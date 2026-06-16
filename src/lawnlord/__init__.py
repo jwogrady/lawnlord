@@ -1,10 +1,10 @@
-"""hoa-case-tools: the zip -> five-level legal corpus generator.
+"""lawnlord: a zip -> five-level legal-corpus generator.
 
-The generator was split out of a single main.py into focused modules
-(paths, hashing, models, boundaries, curation, preservation, analysis_schema,
-archive, corpus, reporting). This package re-exports their public API as a
-flat surface so callers and tests can ``import lawnlord`` and reach
-every symbol, regardless of which module now owns it.
+Logic is split across focused modules (intake, hashing, models, boundaries,
+curation, preservation, analysis_schema, archive, corpus, reporting, cli).
+This package re-exports their public API as a flat surface so callers and
+tests can ``import lawnlord`` and reach every symbol, regardless of which
+module owns it.
 """
 
 from __future__ import annotations
@@ -64,17 +64,19 @@ from .curation import (
     section_curation_for,
 )
 from .hashing import now_iso, sha256_bytes, sha256_file
-from .models import PdfEntry, SectionBoundary, unique_slug
-from .paths import (
+from .intake import (
+    CONFIG_FILENAME,
     CURATION_FILENAME,
-    DEFAULT_CORPUS_DIR,
-    DEFAULT_ZIP_CANDIDATES,
-    FILINGS_DIR,
+    DEFAULT_CORPUS_DIRNAME,
+    DEFAULT_INTAKE_DIRNAME,
     GENERATED_BOUNDARIES_FILENAME,
     MANUAL_BOUNDARIES_FILENAME,
-    REPO_ROOT,
-    resolve_zip_path,
+    Intake,
+    load_intake,
+    resolve_packet,
+    scaffold,
 )
+from .models import PdfEntry, SectionBoundary, unique_slug
 from .preservation import (
     PRESERVED_LEGAL_FIELDS,
     PRESERVED_REVIEW_METADATA_FIELDS,
