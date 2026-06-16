@@ -1,0 +1,87 @@
+"""hoa-case-tools: the zip -> five-level legal corpus generator.
+
+The generator was split out of a single main.py into focused modules
+(paths, hashing, models, boundaries, curation, preservation, analysis_schema,
+archive, corpus, reporting). This package re-exports their public API as a
+flat surface so callers and tests can ``import lawnlord`` and reach
+every symbol, regardless of which module now owns it.
+"""
+
+from __future__ import annotations
+
+from .analysis_schema import legal_analysis_placeholders, write_json
+from .archive import inspect_archive, is_suspicious_entry
+from .boundaries import (
+    CONFIDENCE_BOOKMARK,
+    CONFIDENCE_FALLBACK,
+    CONFIDENCE_FRONT_MATTER,
+    CONFIDENCE_HEADING,
+    CONFIDENCE_MANUAL,
+    CONFIDENCE_UNTRUSTED_BOOKMARK,
+    FILENAME_LIKE_BOOKMARK_RE,
+    HEADING_DANGLING_WORDS,
+    HEADING_MAX_CHARS,
+    HEADING_MAX_WORDS,
+    HEADING_MINOR_WORDS,
+    HEADING_SCAN_LINES,
+    LEGAL_BOUNDARY_PATTERNS,
+    REVIEW_CONFIDENCE_THRESHOLD,
+    TIER_BOOKMARKS,
+    TIER_FALLBACK,
+    TIER_HEADING_SCAN,
+    TIER_MANUAL,
+    build_sections,
+    clean_title,
+    confidence_distribution,
+    covers_exactly,
+    detect_sections_in_doc,
+    finalize_slugs,
+    find_heading_boundary,
+    get_page_text,
+    is_probable_heading_line,
+    legal_keyword_family,
+    load_manual_boundaries,
+    manual_entries_for,
+    normalize_heading_candidate,
+    section_summary,
+    sections_from_manual,
+    uppercase_letter_ratio,
+)
+from .console import console
+from .corpus import (
+    document_manifest_entry,
+    explode_document,
+    manifest_section_entry,
+    submission_entry_from_existing,
+    submission_manifest_entry,
+    write_corpus,
+)
+from .curation import (
+    ALLOWED_CURATED_FIELDS,
+    apply_metadata_overlay,
+    document_curation_for,
+    load_curation,
+    section_curation_for,
+)
+from .hashing import now_iso, sha256_bytes, sha256_file
+from .models import PdfEntry, SectionBoundary, unique_slug
+from .paths import (
+    CURATION_FILENAME,
+    DEFAULT_CORPUS_DIR,
+    DEFAULT_ZIP_CANDIDATES,
+    FILINGS_DIR,
+    GENERATED_BOUNDARIES_FILENAME,
+    MANUAL_BOUNDARIES_FILENAME,
+    REPO_ROOT,
+    resolve_zip_path,
+)
+from .preservation import (
+    PRESERVED_LEGAL_FIELDS,
+    PRESERVED_REVIEW_METADATA_FIELDS,
+    apply_preserved_analysis,
+    collect_reviewed_analysis,
+    is_reviewed_analysis,
+    preservation_exact_key,
+    preservation_fallback_key,
+)
+from .reporting import report_archive, write_boundary_template
