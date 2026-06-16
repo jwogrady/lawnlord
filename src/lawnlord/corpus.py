@@ -33,7 +33,6 @@ from .curation import (
     section_curation_for,
 )
 from .hashing import now_iso, sha256_file
-from .paths import CURATION_FILENAME, FILINGS_DIR
 from .preservation import apply_preserved_analysis, collect_reviewed_analysis
 
 
@@ -373,6 +372,7 @@ def write_corpus(
     force: bool,
     manual_boundaries: dict,
     curation: dict | None = None,
+    curation_path: Path | None = None,
 ) -> dict:
     """Write the Archive -> Submission -> Document corpus model and explode
     every document into section PDFs, page PDFs, page text, page analysis
@@ -628,9 +628,7 @@ def write_corpus(
 
     manifest["curation"] = {
         "loaded": bool(curation),
-        "path": str(FILINGS_DIR / CURATION_FILENAME)
-        if curation
-        else "",
+        "path": str(curation_path) if curation and curation_path else "",
         "documentsApplied": curated_documents_applied,
         "sectionsApplied": curated_sections_applied,
     }

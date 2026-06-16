@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 
 import fitz
 from slugify import slugify
 
 from .console import console
+from .intake import MANUAL_BOUNDARIES_FILENAME
 from .models import SectionBoundary
-from .paths import FILINGS_DIR, MANUAL_BOUNDARIES_FILENAME
 
 # Pattern -> documentFamily. More specific patterns first so family
 # inference picks "certificate-of-service" over "notice" etc. Any match
@@ -171,13 +172,12 @@ def clean_title(text: str, fallback: str) -> str:
     return fallback
 
 
-def load_manual_boundaries() -> dict:
-    """Load optional src/filings/bundle-boundaries.json manual boundaries (Tier 1).
+def load_manual_boundaries(path: Path) -> dict:
+    """Load manual section boundaries (Tier 1) from the given path.
 
     The file is the committed source of truth for section boundaries; it is
     simply honored when present. Returns {} when absent or unparseable.
     """
-    path = FILINGS_DIR / MANUAL_BOUNDARIES_FILENAME
     if not path.exists():
         return {}
 
