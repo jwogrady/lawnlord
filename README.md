@@ -12,10 +12,12 @@ Every unit is traceable back to its original source PDF page, so downstream lega
 is built on a trustworthy substrate. This is **not** a generic PDF splitter; it is
 legal-record normalization.
 
-> **Status:** extracted from its first consumer project into a standalone, installable tool.
-> The CLI currently exposes the original flag interface; the `lawnlord start` intake-scaffold
-> model and the decoupling of input paths from a fixed repo layout are in progress (see
-> **Roadmap**). The baseline test skips when no packet is present.
+> **Status (v0.1.0):** ships the deterministic exploder described below and nothing more.
+> The CLI exposes the original flag interface; the `lawnlord start` intake-scaffold model,
+> input-path decoupling, and the broader "legal understanding engine" (DuckDB index, entity
+> graph, analysis/strategy/drafting) live in [`docs/`](docs/) as the **target vision/roadmap**,
+> not current functionality. See [`CHANGELOG.md`](CHANGELOG.md) for what's in this release.
+> The baseline test skips when no packet is present.
 
 ## Install
 
@@ -37,6 +39,10 @@ lawnlord --emit-boundary-template    # write a reviewable manual-boundary draft;
 ```
 
 `python -m lawnlord …` works as an alternative to the `lawnlord` console script.
+
+When no ZIP path is given, lawnlord searches known locations (`src/filings/E222C7C4.zip`, then
+cwd-relative fallbacks). The corpus is written to `dist/corpus/` by default (generated,
+gitignored).
 
 ## Architecture
 
@@ -89,7 +95,12 @@ behavior change to approve by hand, not to silently update.
 
 ## Roadmap
 
+The full target vision is documented in [`docs/`](docs/) — a local-first "legal understanding
+engine." It is **not** implemented in v0.1.0. Near-term direction:
+
 - `lawnlord start` — scaffold an intake folder a consumer project drops its packet into.
 - Decouple input resolution from the fixed repo layout (operate on the intake folder / CLI args
   instead of a hardcoded `src/filings`).
 - Subcommand CLI (`start`, `build`, `report`, …) replacing the current flags.
+- A DuckDB index over the corpus, then entities, relationships, analysis, and drafting layers
+  (see [`docs/architecture.md`](docs/architecture.md)).
