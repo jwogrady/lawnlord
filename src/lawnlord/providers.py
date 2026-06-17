@@ -71,6 +71,7 @@ class Party:
     representation: str = ""  # e.g. "Pro Se"; empty when represented by counsel
     location: str = ""
     attorneys: tuple[Attorney, ...] = ()
+    aliases: tuple[str, ...] = ()  # re:SearchTX nicknameAlias values
 
 
 @dataclass(frozen=True)
@@ -114,14 +115,25 @@ class Hearing:
 
 
 @dataclass(frozen=True)
+class FinancialTransaction:
+    """One line of the Odyssey financial ledger (register-of-actions)."""
+
+    date: str = ""
+    description: str = ""
+    amount: str = ""
+
+
+@dataclass(frozen=True)
 class Financials:
-    """Money assessed/paid on the case (from the Odyssey financial summary)."""
+    """Money assessed/paid on the case (from the Odyssey financial summary),
+    with the per-line ``transactions`` ledger when the register provides it."""
 
     party: str = ""
     total_assessment: str = ""
     total_payments: str = ""
     balance_due: str = ""
     balance_as_of: str = ""
+    transactions: tuple[FinancialTransaction, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -149,7 +161,8 @@ class DocketEntry:
 
 @dataclass(frozen=True)
 class CaseIdentity:
-    """The case header, combined from case-summary + case-history."""
+    """The case header, combined from case-summary + case-history (and, for a
+    combo intake, the re:SearchTX view: case_category / clerk / last_refreshed)."""
 
     case_number: str
     title: str = ""
@@ -161,6 +174,14 @@ class CaseIdentity:
     disposition_type: str = ""
     disposition_date: str = ""
     source_url: str = ""
+    # Field-complete capture (docs/standard-schema.md): nothing the sources
+    # expose is dropped before unification.
+    citation_number: str = ""  # ody case-summary citationNumber
+    disposition_comment: str = ""  # ody disposition comment
+    disposition_judicial_officer: str = ""  # ody disposition judicialOfficer
+    case_category: str = ""  # re:SearchTX caseCategory (the other taxonomy)
+    clerk: str = ""  # re:SearchTX location (the clerk/venue facet)
+    last_refreshed: str = ""  # re:SearchTX caseLastRefreshed (freshness)
 
 
 @dataclass(frozen=True)
@@ -183,6 +204,10 @@ class CaseModel:
     hearings: tuple[Hearing, ...] = ()
     financials: Financials | None = None
     docket: tuple[DocketEntry, ...] = ()
+    # Field-complete capture of the remaining source structures (combo intake).
+    case_flags: tuple[str, ...] = ()  # re:SearchTX caseFlags rows
+    case_cross_references: tuple[str, ...] = ()  # re:SearchTX caseCrossReferences rows
+    source_note: str = ""  # re:SearchTX _meta.extractedNote (a completeness caveat)
 
 
 def _load_json(path: Path) -> dict:
@@ -228,6 +253,22 @@ def _parse_parties(raw: list | None) -> tuple[Party, ...]:
         )
         for p in (raw or [])
         if isinstance(p, dict)
+    )
+
+
+def _parse_transactions(fi: dict) -> tuple[FinancialTransaction, ...]:
+    """The per-line financial ledger from a financialInformation block."""
+    def s(value) -> str:
+        return "" if value is None else str(value)
+
+    return tuple(
+        FinancialTransaction(
+            date=t.get("date", ""),
+            description=t.get("description", ""),
+            amount=s(t.get("amount")),
+        )
+        for t in (fi.get("transactions") or [])
+        if isinstance(t, dict)
     )
 
 
@@ -284,6 +325,9 @@ def _parse_identity(summary: dict, history: dict) -> CaseIdentity:
         disposition_type=disposition.get("type", ""),
         disposition_date=disposition.get("date", ""),
         source_url=_first(history.get("sourceUrl"), summary.get("sourceUrl")),
+        citation_number=summary.get("citationNumber") or "",
+        disposition_comment=disposition.get("comment", ""),
+        disposition_judicial_officer=disposition.get("judicialOfficer", ""),
     )
 
 
@@ -353,6 +397,7 @@ def _parse_financials(history: dict) -> Financials | None:
         total_payments=s(fi.get("totalPaymentsAndCredits")),
         balance_due=s(balance.get("amount")),
         balance_as_of=s(balance.get("date")),
+        transactions=_parse_transactions(fi),
     )
 
 
@@ -423,6 +468,66 @@ def _parse_docket(meta: dict, documents: tuple[DocumentRef, ...]) -> tuple[Docke
     return tuple(entries)
 
 
+def _meta_case_info(meta: dict) -> dict:
+    ci = meta.get("caseInformation")
+    return ci if isinstance(ci, dict) else {}
+
+
+def _enrich_identity(identity: CaseIdentity, meta: dict) -> CaseIdentity:
+    """Merge the re:SearchTX view's distinct facets onto the identity: its own
+    category taxonomy, the clerk/venue, and the refresh timestamp."""
+    ci = _meta_case_info(meta)
+    if not ci:
+        return identity
+    return replace(
+        identity,
+        case_category=ci.get("caseCategory", "") or identity.case_category,
+        clerk=ci.get("location", "") or identity.clerk,
+        last_refreshed=ci.get("caseLastRefreshed", "") or identity.last_refreshed,
+    )
+
+
+def _enrich_aliases(parties: tuple[Party, ...], meta: dict) -> tuple[Party, ...]:
+    """Attach re:SearchTX nicknameAlias values to the matching party by name."""
+    aliases: dict[str, str] = {}
+    for p in _meta_table_rows(meta, "parties"):
+        if isinstance(p, dict) and p.get("name"):
+            alias = p.get("nicknameAlias")
+            if alias and alias != "None":
+                aliases[_norm(p["name"])] = alias
+    if not aliases:
+        return parties
+    return tuple(
+        replace(p, aliases=(aliases[_norm(p.name)],))
+        if _norm(p.name) in aliases
+        else p
+        for p in parties
+    )
+
+
+def _meta_rows_json(meta: dict, key: str) -> tuple[str, ...]:
+    """Capture a meta table's rows verbatim (as JSON) so nothing is dropped,
+    even for sections we do not yet model structurally (flags, cross-refs)."""
+    return tuple(
+        json.dumps(r, sort_keys=True)
+        for r in _meta_table_rows(meta, key)
+        if isinstance(r, dict) and r
+    )
+
+
+def _combo_financials(history: dict, register: dict) -> Financials | None:
+    """The financial summary (case-history), enriched with the per-line ledger
+    from register-of-actions when the summary block omits it."""
+    fin = _parse_financials(history) or _parse_financials(register)
+    if fin is None:
+        return None
+    if not fin.transactions:
+        reg = _parse_financials(register)
+        if reg and reg.transactions:
+            fin = replace(fin, transactions=reg.transactions)
+    return fin
+
+
 def parse_combo(intake_dir: str | Path) -> CaseModel:
     """Parse a reconciled ``combo`` intake: the Odyssey export merged with the
     re:SearchTX ``meta.json`` so the model carries the best of both portals.
@@ -440,13 +545,19 @@ def parse_combo(intake_dir: str | Path) -> CaseModel:
     meta = _load_json(intake_dir / RESEARCH_META_FILENAME)
     history = _load_json(intake_dir / CASE_HISTORY_FILENAME)
     register = _load_json(intake_dir / REGISTER_OF_ACTIONS_FILENAME)
+    note = (meta.get("_meta") or {}).get("extractedNote", "") if isinstance(meta, dict) else ""
 
+    parties = _enrich_aliases(_enrich_attorney_numbers(base.parties, meta), meta)
     return replace(
         base,
-        parties=_enrich_attorney_numbers(base.parties, meta),
+        identity=_enrich_identity(base.identity, meta),
+        parties=parties,
         hearings=_parse_hearings(meta),
-        financials=_parse_financials(history) or _parse_financials(register),
+        financials=_combo_financials(history, register),
         docket=_parse_docket(meta, base.documents),
+        case_flags=_meta_rows_json(meta, "caseFlags"),
+        case_cross_references=_meta_rows_json(meta, "caseCrossReferences"),
+        source_note=note,
     )
 
 

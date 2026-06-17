@@ -70,9 +70,17 @@ def test_combo_provider_registered():
 
 
 def test_combo_degrades_to_odyssey_without_meta(ody_intake):
-    # An Odyssey folder with no meta.json / no financials parses identically
-    # to parse_odyssey (the merge adds nothing it doesn't have).
-    assert main.parse_combo(ody_intake) == main.parse_odyssey(ody_intake)
+    # Without a meta.json there is nothing to merge (no hearings/docket/aliases),
+    # so combo is the plain Odyssey parse plus the financials it lifts from the
+    # register — i.e. identical once financials are set aside.
+    from dataclasses import replace
+
+    combo = main.parse_combo(ody_intake)
+    odyssey = main.parse_odyssey(ody_intake)
+    assert combo.hearings == ()
+    assert combo.docket == ()
+    assert combo.financials is not None  # lifted from the register
+    assert replace(combo, financials=None) == odyssey
 
 
 def test_combo_merges_research_meta(combo_intake):
@@ -155,3 +163,41 @@ def test_malformed_inputs_do_not_crash(tmp_path):
     assert [e.event for e in model.events] == ["X"]  # None entry skipped
     assert model.events[0].files == ()  # files: null tolerated
     assert [d.filename for d in model.documents] == ["A.pdf"]  # bare row skipped
+
+
+# --- C1: field-complete capture (nothing the sources expose is dropped) ------
+
+
+def test_combo_captures_every_field_no_silent_drop(combo_intake):
+    """Each currently-droppable source field is represented in the parsed model
+    (docs/standard-schema.md). A new source field that lands unmapped should
+    fail this test until it is given a home."""
+    model = main.parse_combo(combo_intake)
+    ident = model.identity
+    # ody case-summary / case-history
+    assert ident.citation_number == "CIT-7788"
+    assert ident.disposition_comment == "Final Summary Judgment"
+    assert ident.disposition_judicial_officer == "Justice, Jane"
+    # re:SearchTX caseInformation facets
+    assert ident.case_category == "Civil - Other Civil"
+    assert ident.clerk == "Test County - District Clerk"
+    assert ident.last_refreshed == "6/3/25, 4:59 AM"
+    # party alias (nicknameAlias), skipping the literal "None"
+    plaintiff = next(p for p in model.parties if p.role == "Plaintiff")
+    defendant = next(p for p in model.parties if p.role == "Defendant")
+    assert plaintiff.aliases == ("GCPRA",)
+    assert defendant.aliases == ()
+    # register financial ledger
+    assert model.financials is not None
+    assert len(model.financials.transactions) == 2
+    assert model.financials.transactions[0].amount == "366"
+    # structural sections + freshness caveat
+    assert model.case_flags == ()
+    assert model.case_cross_references == ()
+    assert "total is 26" in model.source_note
+
+
+def test_field_complete_model_round_trips(combo_intake):
+    # The enriched model still round-trips losslessly through case.json.
+    model = main.parse_combo(combo_intake)
+    assert main.from_canonical(main.to_canonical(model)) == model

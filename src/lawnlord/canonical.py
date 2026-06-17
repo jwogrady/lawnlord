@@ -25,6 +25,7 @@ from .providers import (
     DocumentRef,
     Event,
     Financials,
+    FinancialTransaction,
     Hearing,
     Party,
 )
@@ -37,15 +38,21 @@ def _identity(identity: CaseIdentity) -> dict:
         "caseNumber": identity.case_number,
         "title": identity.title,
         "court": identity.court,
+        "clerk": identity.clerk,
         "judicialOfficer": identity.judicial_officer,
         "caseType": identity.case_type,
+        "caseCategory": identity.case_category,
         "status": identity.status,
         "dateFiled": identity.date_filed,
+        "citationNumber": identity.citation_number,
         "disposition": {
             "type": identity.disposition_type,
             "date": identity.disposition_date,
+            "comment": identity.disposition_comment,
+            "judicialOfficer": identity.disposition_judicial_officer,
         },
         "sourceUrl": identity.source_url,
+        "lastRefreshed": identity.last_refreshed,
     }
 
 
@@ -55,6 +62,7 @@ def _party(party: Party) -> dict:
         "name": party.name,
         "representation": party.representation,
         "location": party.location,
+        "aliases": list(party.aliases),
         "attorneys": [
             {"name": a.name, "number": a.number, "status": a.status, "phone": a.phone}
             for a in party.attorneys
@@ -71,6 +79,10 @@ def _financials(fin: Financials | None) -> dict | None:
         "payments": fin.total_payments,
         "balanceDue": fin.balance_due,
         "asOf": fin.balance_as_of,
+        "transactions": [
+            {"date": t.date, "description": t.description, "amount": t.amount}
+            for t in fin.transactions
+        ],
     }
 
 
@@ -131,6 +143,9 @@ def to_canonical(model: CaseModel) -> dict:
         "events": [_event(e) for e in model.events],
         "docket": [_docket_entry(d) for d in model.docket],
         "documents": [_document(d) for d in model.documents],
+        "caseFlags": list(model.case_flags),
+        "caseCrossReferences": list(model.case_cross_references),
+        "sourceNote": model.source_note,
     }
 
 
@@ -150,6 +165,12 @@ def _read_identity(case: dict) -> CaseIdentity:
         disposition_type=disposition.get("type", ""),
         disposition_date=disposition.get("date", ""),
         source_url=case.get("sourceUrl", ""),
+        citation_number=case.get("citationNumber", ""),
+        disposition_comment=disposition.get("comment", ""),
+        disposition_judicial_officer=disposition.get("judicialOfficer", ""),
+        case_category=case.get("caseCategory", ""),
+        clerk=case.get("clerk", ""),
+        last_refreshed=case.get("lastRefreshed", ""),
     )
 
 
@@ -159,6 +180,7 @@ def _read_party(p: dict) -> Party:
         name=p.get("name", ""),
         representation=p.get("representation", ""),
         location=p.get("location", ""),
+        aliases=tuple(p.get("aliases") or []),
         attorneys=tuple(
             Attorney(
                 name=a.get("name", ""),
@@ -182,6 +204,14 @@ def from_canonical(data: dict) -> CaseModel:
             total_payments=fin.get("payments", ""),
             balance_due=fin.get("balanceDue", ""),
             balance_as_of=fin.get("asOf", ""),
+            transactions=tuple(
+                FinancialTransaction(
+                    date=t.get("date", ""),
+                    description=t.get("description", ""),
+                    amount=t.get("amount", ""),
+                )
+                for t in (fin.get("transactions") or [])
+            ),
         )
         if isinstance(fin, dict)
         else None
@@ -240,4 +270,7 @@ def from_canonical(data: dict) -> CaseModel:
             )
             for d in (data.get("docket") or [])
         ),
+        case_flags=tuple(data.get("caseFlags") or []),
+        case_cross_references=tuple(data.get("caseCrossReferences") or []),
+        source_note=data.get("sourceNote", ""),
     )
