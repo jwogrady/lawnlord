@@ -5,7 +5,7 @@ function of the intake JSON plus the exploded corpus, fully regenerable. It
 never authors content. ``apply_schema`` is idempotent and versioned;
 ``open_case_db`` opens (creating if needed) the per-case database file.
 
-Vocabulary (source-true, see docs/plans/v0.3.0): an **image** is a filed PDF
+Vocabulary (source-true; glossary in docs/schema.md): an **image** is a filed PDF
 (Odyssey's own term for it), and a **document** is a logical document *within*
 an image (a Motion, an Exhibit, an Affidavit) — what the exploder detects as a
 boundary section. So ``images`` holds the filed PDFs and ``documents`` holds the
