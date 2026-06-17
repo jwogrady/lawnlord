@@ -26,6 +26,13 @@ from .db import apply_schema, open_case_db
 from .index import index_corpus
 from .ingest import ingest_case
 from .intake import load_intake, resolve_packet, scaffold
+from .query import (
+    documents_by_event,
+    documents_by_party,
+    documents_by_phase,
+    needs_review_sections,
+    search_text,
+)
 from .reporting import report_archive, write_boundary_template
 from .workspace import Case
 
@@ -114,11 +121,30 @@ def build_parser() -> argparse.ArgumentParser:
         "--force", action="store_true", help="Rebuild existing submission folders"
     )
 
+    p_query = sub.add_parser(
+        "query", help="Read-only search over the case index (with provenance)"
+    )
+    p_query.add_argument(
+        "--case-dir", default=".", help="Case output root holding lawnlord.duckdb (default: cwd)"
+    )
+    p_query.add_argument("--text", default=None, help="Full-text search over page text")
+    p_query.add_argument(
+        "--needs-review", action="store_true", help="Sections flagged for human review"
+    )
+    p_query.add_argument("--event", default=None, help="Documents for a docket event type")
+    p_query.add_argument("--phase", default=None, help="Documents filed in a docket phase")
+    p_query.add_argument("--party", default=None, help="Documents tied to a party")
+    p_query.add_argument("--limit", type=int, default=50, help="Max --text results")
+
     return parser
 
 
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
+
+    if args.command == "query":
+        _run_query(args)
+        return
 
     if args.command == "index":
         case = Case.from_intake(args.intake, case_dir=args.case_dir)
@@ -208,6 +234,41 @@ def main(argv: list[str] | None = None) -> None:
         )
         _print_build_summary(manifest, corpus_dir)
         return
+
+
+def _render_rows(title: str, rows: list[dict]) -> None:
+    if not rows:
+        console.print(f"[yellow]No results for {title}.[/]")
+        return
+    table = Table(title=title)
+    for col in rows[0]:
+        table.add_column(col)
+    for row in rows:
+        table.add_row(*[("" if v is None else str(v)) for v in row.values()])
+    console.print(table)
+    console.print(f"[dim]{len(rows)} result(s)[/]")
+
+
+def _run_query(args) -> None:
+    db_path = Path(args.case_dir) / "lawnlord.duckdb"
+    con = open_case_db(db_path, read_only=True)
+    try:
+        if args.text is not None:
+            _render_rows(f"text: {args.text!r}", search_text(con, args.text, args.limit))
+        elif args.needs_review:
+            _render_rows("needs review", needs_review_sections(con))
+        elif args.phase is not None:
+            _render_rows(f"phase: {args.phase}", documents_by_phase(con, args.phase))
+        elif args.event is not None:
+            _render_rows(f"event: {args.event}", documents_by_event(con, args.event))
+        elif args.party is not None:
+            _render_rows(f"party: {args.party}", documents_by_party(con, args.party))
+        else:
+            console.print(
+                "[red]Specify a filter:[/] --text / --needs-review / --phase / --event / --party"
+            )
+    finally:
+        con.close()
 
 
 def _print_index_summary(case, ingest_stats: dict, index_stats: dict) -> None:
