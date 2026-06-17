@@ -108,12 +108,58 @@ body {
 .docitem .doctitle {
 	font-weight: 600;
 }
+.docitem .docn {
+	color: var(--gold-deep);
+	font-variant-numeric: tabular-nums;
+}
 .docitem .docmeta {
 	color: var(--muted);
 	font-size: 12px;
 	display: flex;
 	gap: 8px;
 	align-items: center;
+}
+
+/* the current document expands into its pages — the TOC drills to page level */
+.pages {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
+	gap: 4px;
+	padding: 6px 6px 10px;
+}
+.pageitem {
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	gap: 3px;
+	background: var(--ink);
+	border: 1px solid var(--line);
+	border-radius: 6px;
+	padding: 5px 4px;
+	color: var(--muted);
+	font-size: 12px;
+	font-variant-numeric: tabular-nums;
+	cursor: pointer;
+}
+.pageitem:hover {
+	border-color: var(--gold-deep);
+	color: var(--cream);
+}
+.pageitem.done {
+	color: var(--grass);
+}
+.pageitem.flag {
+	color: var(--gold);
+	border-color: var(--gold-deep);
+}
+/* current page wins — listed last so its highlight isn't overridden */
+.pageitem.cur {
+	border-color: var(--gold);
+	color: var(--gold);
+	background: #16200c;
+}
+.pageitem .mk {
+	font-size: 10px;
 }
 
 .fam {
