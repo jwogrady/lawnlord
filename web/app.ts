@@ -86,6 +86,7 @@ let mode: "original" | "enhanced" =
 	(localStorage.getItem("lawnlord-mode") as "original" | "enhanced") ??
 	"enhanced";
 let idx = 0;
+let origImage = ""; // the filing PDF shown in Original mode
 
 function esc(s: string): string {
 	return (s ?? "").replace(
@@ -171,62 +172,46 @@ function render(): void {
 	renderEnhanced();
 }
 
-// ORIGINAL — the court's register of actions, verbatim, plus the filed page
-// (the court's own document). No text, scores, parts, or reconstruction.
+// ORIGINAL — the court's register of actions, verbatim, alongside the court's
+// own filing as a native PDF (selectable text, real paging) — not a render of
+// it. No extracted text, scores, parts, or reconstruction.
 function renderOriginal(): void {
 	const m = manifest;
 	progressEl.textContent = `${m.registerOfActions.length} docket entries · ${m.case}`;
-	const filings = filingGroups();
-	const curImg = data.pages[idx]?.image;
+	// the filings the court actually has documents for, in docket order
+	const withDoc = m.registerOfActions.filter((e) => e.filing);
+	if (!origImage && withDoc[0]?.filing) origImage = withDoc[0].filing.image;
+	const cur = withDoc.find((e) => e.filing?.image === origImage);
 	const roa = m.registerOfActions
 		.map((e) => {
 			const f = e.filing;
-			const target = f ? filings.find((g) => g.image === f.image) : undefined;
-			const first = target ? target.first : -1;
-			const isCur = !!f && f.image === curImg;
+			const isCur = !!f && f.image === origImage;
 			const badge = e.type ? `<span class="fam">${esc(e.type)}</span>` : "";
 			const pp = f ? `${f.declaredPages} pp` : "no document";
 			const title = f ? esc(f.title) : esc(e.description || e.type);
-			return `<button class="docitem${isCur ? " cur" : ""}" data-first="${first}"${first < 0 ? " disabled" : ""}>
+			return `<button class="docitem${isCur ? " cur" : ""}" data-image="${f ? esc(f.image) : ""}"${f ? "" : " disabled"}>
         <span class="doctitle"><span class="docn">${esc(e.date)}</span> ${title}</span>
         <span class="docmeta">${badge}${pp}${e.party ? ` · ${esc(e.party)}` : ""}</span>
       </button>`;
 		})
 		.join("");
-	const p = data.pages[idx];
-	const viewer = p
-		? `<section class="score-bar"><span class="doc">${esc(p.filing.title)}</span>
-        <span class="pageid">${esc(p.image)} · p.${p.page} of ${p.actualPages ?? "?"}</span></section>
-      <section class="single"><figure><figcaption>FILED PAGE — original (court record)</figcaption>
-        <img src="${p.actual}" alt="filed page" /></figure></section>
-      <section class="review"><div class="actions">
-        <button id="prev"${idx === 0 ? " disabled" : ""}>‹ prev</button>
-        <button id="next"${idx === data.pages.length - 1 ? " disabled" : ""}>next ›</button>
-      </div></section>`
+	const viewer = cur?.filing
+		? `<section class="score-bar"><span class="doc">${esc(cur.filing.title)}</span>
+        <span class="pageid">${esc(cur.filing.image)} · ${cur.filing.declaredPages} pp · filed ${esc(cur.date)}</span></section>
+      <section class="single"><figcaption>FILED DOCUMENT — original (court record)</figcaption>
+        <iframe class="pdf" src="/filings/${encodeURIComponent(cur.filing.image)}#view=FitH" title="${esc(cur.filing.title)}"></iframe></section>`
 		: `<section class="score-bar"><span class="note">Select a filing from the register.</span></section>`;
 	app.innerHTML = `<aside class="docs"><div class="docs-h">Register of actions — ${esc(m.case)}</div>${roa}</aside>
     <section class="pane">${viewer}</section>`;
 	for (const el of app.querySelectorAll(".docitem")) {
 		(el as HTMLButtonElement).onclick = () => {
-			const f = Number((el as HTMLElement).dataset.first);
-			if (f >= 0) {
-				idx = f;
+			const image = (el as HTMLElement).dataset.image;
+			if (image) {
+				origImage = image;
 				render();
 			}
 		};
 	}
-	const prev = document.getElementById("prev") as HTMLButtonElement | null;
-	const next = document.getElementById("next") as HTMLButtonElement | null;
-	if (prev)
-		prev.onclick = () => {
-			if (idx > 0) idx--;
-			render();
-		};
-	if (next)
-		next.onclick = () => {
-			if (idx < data.pages.length - 1) idx++;
-			render();
-		};
 }
 
 function renderEnhanced(): void {
