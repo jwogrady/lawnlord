@@ -125,3 +125,11 @@ model, unfilled page-analysis stub) that must hold for any input.
 - Richer `lawnlord.toml` (per-run options, naming conventions).
 - Docket-aware submission grouping (multiple PDFs per submission) instead of one-PDF-per-submission.
 - Optional packaging of the generated corpus for downstream consumers.
+
+See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the current, authoritative roadmap.
+
+## License
+
+Proprietary — © 2026 jwogrady. **All rights reserved.** This repository is published for reference
+and transparency only; no permission is granted to use, copy, modify, or distribute the software or
+its source. See [`LICENSE`](LICENSE).
