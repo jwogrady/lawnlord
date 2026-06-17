@@ -77,6 +77,22 @@ def needs_review_documents(con: duckdb.DuckDBPyConnection) -> list[dict]:
     )
 
 
+def needs_review_pages(con: duckdb.DuckDBPyConnection) -> list[dict]:
+    """Pages the confidence gate (#33) flagged for review — below the threshold
+    against the Odyssey metadata and/or the source PDF — with their score."""
+    return _rows(
+        con,
+        """
+        SELECT c.image_id, i.title AS image_title, c.source_page_number,
+               c.confidence, c.citation_display
+        FROM chunks c LEFT JOIN images i ON i.id = c.image_id
+        WHERE c.needs_review = TRUE
+        ORDER BY c.confidence, c.image_id, c.source_page_number
+        """,
+        [],
+    )
+
+
 def images_by_phase(con: duckdb.DuckDBPyConnection, phase: str) -> list[dict]:
     """Images (filed PDFs) filed in a docket ``phase`` (e.g. "Summary Judgment")."""
     return _rows(
