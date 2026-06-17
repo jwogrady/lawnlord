@@ -9,6 +9,7 @@
     lawnlord assemble [intake]         reassemble images into one master PDF (round-trip proof)
     lawnlord bundle [intake]           wrap the complete case (metadata + master + pages + index) into one zip
     lawnlord query                     read-only search over the index (with provenance)
+    lawnlord timeline                  read-only factual timeline (docket events + extracted dates)
 
 ``root`` defaults to the current directory; lawnlord resolves the intake/corpus
 locations from it (honoring an optional lawnlord.toml). All the real work lives
@@ -41,6 +42,7 @@ from .query import (
     images_by_phase,
     needs_review_documents,
     search_text,
+    timeline,
 )
 from .reporting import report_archive, write_boundary_template
 from .workspace import Case
@@ -218,6 +220,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_query.add_argument("--party", default=None, help="Documents tied to a party")
     p_query.add_argument("--limit", type=int, default=50, help="Max --text results")
 
+    p_timeline = sub.add_parser(
+        "timeline",
+        help="Read-only factual timeline: docket events + extracted date facts",
+    )
+    p_timeline.add_argument(
+        "--case-dir", default=".", help="Case output root holding lawnlord.duckdb (default: cwd)"
+    )
+
     return parser
 
 
@@ -226,6 +236,10 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.command == "query":
         _run_query(args)
+        return
+
+    if args.command == "timeline":
+        _run_timeline(args)
         return
 
     if args.command == "pack":
@@ -439,6 +453,35 @@ def _run_query(args) -> None:
             console.print(
                 "[red]Specify a filter:[/] --text / --needs-review / --phase / --event / --party"
             )
+    finally:
+        con.close()
+
+
+def _run_timeline(args) -> None:
+    db_path = Path(args.case_dir) / "lawnlord.duckdb"
+    con = open_case_db(db_path, read_only=True)
+    try:
+        tl = timeline(con)
+        table = Table(title="Case timeline (derived from the record)")
+        table.add_column("Date")
+        table.add_column("Source")
+        table.add_column("Item")
+        table.add_column("Provenance")
+        table.add_column("⚑")
+        for i in tl["dated"]:
+            table.add_row(
+                i["date"], i["source"], i["label"][:70], i["detail"],
+                "[yellow]review[/]" if i["flag"] else "",
+            )
+        console.print(table)
+        console.print(f"[dim]{len(tl['dated'])} dated item(s)[/]")
+        if tl["undated"]:
+            undated = Table(title="No date in the record")
+            undated.add_column("Source")
+            undated.add_column("Item")
+            for i in tl["undated"]:
+                undated.add_row(i["source"], i["label"][:70])
+            console.print(undated)
     finally:
         con.close()
 
