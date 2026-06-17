@@ -25,6 +25,7 @@ if str(SRC_DIR) not in sys.path:
 # test deduplication). No real case data is committed.
 _CASE_SUMMARY = {
     "caseNumber": "99-00-12345",
+    "citationNumber": "CIT-7788",
     "caseTitle": "ACME ASSOCIATION VS. JOHN DOE",
     "dateFiled": "01/02/2025",
     "location": "1st Judicial District Court",
@@ -60,6 +61,8 @@ _CASE_HISTORY = {
     "disposition": {
         "date": "2025-06-01",
         "type": "Summary Judgment",
+        "comment": "Final Summary Judgment",
+        "judicialOfficer": "Justice, Jane",
         "files": ["filings/Final_Judgment.pdf"],
     },
     "timeline": [
@@ -95,6 +98,16 @@ _REGISTER_OF_ACTIONS = {
         {"date": "01/02/2025", "description": "Original Petition (OCA)",
          "files": ["filings/Petition.pdf"]},
     ],
+    "financialInformation": {
+        "party": "Plaintiff - Acme Association",
+        "totalFinancialAssessment": "366",
+        "totalPaymentsAndCredits": "366",
+        "balanceDueAsOf": {"date": "06/16/2025", "amount": 0},
+        "transactions": [
+            {"date": "01/08/2025", "description": "Transaction Assessment", "amount": "366"},
+            {"date": "01/08/2025", "description": "Credit Card Payment", "amount": "-366"},
+        ],
+    },
 }
 
 _FILINGS = {
@@ -165,16 +178,28 @@ _CASE_HISTORY_WITH_MONEY = {
 # page counts are richer than the Odyssey timeline. Document names are spelled
 # to resolve back to the filings (e.g. "Final Judgment.pdf" -> Final_Judgment.pdf).
 _RESEARCH_META = {
-    "_meta": {"source": "re:SearchTX"},
-    "caseInformation": {"caseNumber": "99-00-12345", "judge": "Justice, Jane"},
+    "_meta": {
+        "source": "re:SearchTX",
+        "extractedNote": "Events table is paginated at 20 rows/page; total is 26",
+    },
+    "caseInformation": {
+        "caseNumber": "99-00-12345",
+        "judge": "Justice, Jane",
+        "caseCategory": "Civil - Other Civil",
+        "location": "Test County - District Clerk",
+        "caseLastRefreshed": "6/3/25, 4:59 AM",
+    },
+    "caseFlags": {"rows": []},
+    "caseCrossReferences": {"rows": []},
     "parties": {
         "rows": [
             {
                 "type": "Plaintiff",
                 "name": "Acme Association",
+                "nicknameAlias": "GCPRA",
                 "attorneys": [{"name": "Pat Counsel", "attorneyNumber": "24000001"}],
             },
-            {"type": "Defendant", "name": "John Doe", "attorneys": []},
+            {"type": "Defendant", "name": "John Doe", "nicknameAlias": "None", "attorneys": []},
         ]
     },
     "hearings": {
