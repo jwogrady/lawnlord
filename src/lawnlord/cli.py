@@ -31,7 +31,7 @@ from .db import apply_schema, open_case_db
 from .index import index_corpus
 from .ingest import ingest_case
 from .intake import load_intake, resolve_packet, scaffold
-from .ocr import make_ocr
+from .ocr import make_lazy_ocr
 from .pack import pack_case
 from .query import (
     images_by_event,
@@ -65,12 +65,15 @@ def _add_packet(parser: argparse.ArgumentParser) -> None:
 
 
 def _ocr_for(args):
-    """Build the OCR backend from --ocr/--gpu flags (--gpu implies OCR)."""
+    """The OCR backend for a build. OCR is **on by default** so every page is
+    searchable; it is lazy (the engine loads only when a text-less page is found)
+    and degrades gracefully when the optional 'ocr' extra is missing. ``--no-ocr``
+    disables it (the fast path); ``--gpu`` runs the engine on CUDA."""
+    if getattr(args, "no_ocr", False):
+        return None
     if getattr(args, "gpu", False):
-        return make_ocr(use_gpu=True)
-    if getattr(args, "ocr", False):
-        return make_ocr()
-    return None
+        return make_lazy_ocr(use_gpu=True)
+    return make_lazy_ocr()
 
 
 def _resolve_source(intake, explicit) -> Path:
@@ -113,12 +116,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--force", action="store_true", help="Rebuild existing submission folders"
     )
     p_build.add_argument(
-        "--ocr", action="store_true",
-        help="OCR scanned pages with no text layer (needs the 'ocr' extra)",
+        "--no-ocr", action="store_true",
+        help="Disable OCR (the fast path); scanned pages stay empty + flagged for review",
     )
     p_build.add_argument(
         "--gpu", action="store_true",
-        help="Run OCR on the GPU (CUDA) when available; implies --ocr",
+        help="Run OCR on the GPU (CUDA) when available",
     )
 
     p_emit = sub.add_parser(
@@ -145,12 +148,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--force", action="store_true", help="Rebuild existing submission folders"
     )
     p_index.add_argument(
-        "--ocr", action="store_true",
-        help="OCR scanned pages with no text layer (needs the 'ocr' extra)",
+        "--no-ocr", action="store_true",
+        help="Disable OCR (the fast path); scanned pages stay empty + flagged for review",
     )
     p_index.add_argument(
         "--gpu", action="store_true",
-        help="Run OCR on the GPU (CUDA) when available; implies --ocr",
+        help="Run OCR on the GPU (CUDA) when available",
     )
 
     p_pack = sub.add_parser(
