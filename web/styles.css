@@ -50,8 +50,13 @@ body {
 	color: var(--gold);
 }
 #bar .logo {
-	height: 36px;
+	height: 34px;
 	width: auto;
+	/* the mark's "LAWN" is dark green — give it the cream plate it was drawn
+	   for so it reads against the dark header */
+	background: var(--cream);
+	padding: 4px 9px;
+	border-radius: 8px;
 }
 #bar .progress {
 	color: var(--muted);
@@ -170,6 +175,21 @@ body {
 	padding: 1px 8px;
 	font-size: 11px;
 	letter-spacing: 0.3px;
+}
+
+/* a rendered/declared page-count mismatch — surfaced, never hidden */
+.flagcount {
+	color: var(--gold);
+	font-weight: 600;
+}
+
+/* additive sub-unit (exhibit/part) annotation in the score bar */
+.score-bar .part {
+	color: var(--gold);
+	font-size: 12px;
+	border: 1px dashed var(--gold-deep);
+	border-radius: 6px;
+	padding: 1px 8px;
 }
 
 .pane {

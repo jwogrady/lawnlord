@@ -10,6 +10,7 @@ at it). OCR runs on the GPU when ``ocr`` is built with ``use_gpu=True``.
 from __future__ import annotations
 
 import json
+from collections import defaultdict
 from pathlib import Path
 
 import fitz
@@ -79,26 +80,35 @@ def emit_compare(
     master = fitz.open(master_path)
     src_cache: dict[str, fitz.Document] = {}
     pages: list[dict] = []
+    declared_by: dict[str, int | None] = {}
+    actual_by: dict[str, int | None] = {}
+    rendered: dict[str, set[int]] = defaultdict(set)
     try:
         for pg in amanifest["pageProvenance"]:
             filename, spn, mpage = pg["image"], pg["sourcePage"], pg["masterPage"]
             row = con.execute(
                 """
-                SELECT i.intake_path, COALESCE(i.page_count_mismatch, TRUE),
+                SELECT i.intake_path, i.title,
+                       i.declared_page_count, i.actual_page_count,
+                       COALESCE(i.page_count_mismatch, TRUE),
+                       e.event_type, e.date,
                        c.confidence, c.text_source,
                        (c.text IS NOT NULL AND length(trim(c.text)) > 0),
-                       d.id, d.title, d.document_family,
-                       d.source_page_start, d.source_page_end
+                       d.title, d.document_family
                 FROM chunks c
                 JOIN images i ON i.id = c.image_id
+                LEFT JOIN image_events ie ON ie.image_id = i.id
+                LEFT JOIN events e ON e.id = ie.event_id
                 LEFT JOIN documents d ON d.id = c.document_id
                 WHERE i.filename = ? AND c.source_page_number = ? LIMIT 1
                 """,
                 [filename, spn],
             ).fetchone()
-            (intake_path, mismatch, conf, tsource, has_text,
-             doc_id, doc_title, doc_family, dstart, dend) = row or (
-                None, True, None, None, False, None, None, None, None, None,
+            (intake_path, img_title, declared, actual, mismatch,
+             ev_type, ev_date, conf, tsource, has_text,
+             doc_title, doc_family) = row or (
+                None, filename, None, None, True,
+                None, None, None, None, False, None, None,
             )
             stem = Path(filename).stem
             actual_name = f"{stem}-p{spn:03d}-actual.png"
@@ -111,20 +121,30 @@ def emit_compare(
                 if 1 <= spn <= src.page_count:
                     _render(src[spn - 1], images_dir / actual_name, dpi)
             _render(master[mpage - 1], images_dir / recon_name, dpi)
+            declared_by[filename] = declared
+            actual_by[filename] = actual
+            rendered[filename].add(spn)
             pages.append(
                 {
                     "id": f"{stem}_p{spn}",
-                    "image": filename,
-                    "page": spn,
-                    # the additive document/exhibit this page belongs to (#69),
-                    # so the reviewer compares at the litigation unit, not flat pages
-                    "document": {
-                        "id": doc_id or stem,
-                        "title": doc_title or filename,
-                        "family": doc_family or "",
-                        "pageStart": dstart,
-                        "pageEnd": dend,
+                    # the court's structure: case -> filing (submission event) -> image
+                    "filing": {
+                        "title": img_title or filename,
+                        "type": ev_type or "",
+                        "date": ev_date or "",
                     },
+                    "image": filename,
+                    "declaredPages": declared,
+                    "actualPages": actual,
+                    "mismatch": bool(mismatch),
+                    "page": spn,
+                    # ADDITIVE: the boundary-detected sub-unit (analysis, not the
+                    # court's structure) — annotation on the page, never the root.
+                    "document": (
+                        {"title": doc_title, "family": doc_family or ""}
+                        if doc_title
+                        else None
+                    ),
                     "actual": f"/images/{actual_name}",
                     "reconstructed": f"/images/{recon_name}",
                     "score": round(conf if conf is not None else 0.0, 3),
@@ -137,7 +157,58 @@ def emit_compare(
             src.close()
         con.close()
 
+    integrity = _reconcile(rendered, declared_by, actual_by, len(pages))
     (out_dir / "compare.json").write_text(
-        json.dumps({"case": case.case_number, "pages": pages}, indent=2), encoding="utf-8"
+        json.dumps(
+            {"case": case.case_number, "integrity": integrity, "pages": pages},
+            indent=2,
+        ),
+        encoding="utf-8",
     )
-    return {"case": case.case_number, "pages": len(pages), "out": str(out_dir)}
+    if integrity["errors"]:
+        raise ValueError(
+            "compare does not reconcile with the source — pages missing:\n  "
+            + "\n  ".join(integrity["errors"])
+        )
+    return {
+        "case": case.case_number,
+        "pages": len(pages),
+        "out": str(out_dir),
+        "flags": len(integrity["flags"]),
+    }
+
+
+def _reconcile(
+    rendered: dict[str, set[int]],
+    declared_by: dict[str, int | None],
+    actual_by: dict[str, int | None],
+    total_pages: int,
+) -> dict:
+    """Compare the rendered output against the court manifest, per image.
+
+    Hard error if we hold a source page we failed to render (a real drop).
+    Flag — a finding, not a tool bug — when the docket's declared page count
+    disagrees with the actual file. Never silent: both land in compare.json.
+    """
+    images: list[dict] = []
+    errors: list[str] = []
+    flags: list[str] = []
+    for name in sorted(rendered):
+        r = len(rendered[name])
+        actual = actual_by.get(name)
+        declared = declared_by.get(name)
+        images.append(
+            {"image": name, "rendered": r, "actual": actual, "declared": declared}
+        )
+        if actual is not None and r != actual:
+            errors.append(f"{name}: rendered {r} of {actual} source pages")
+        if declared is not None and actual is not None and declared != actual:
+            flags.append(f"{name}: docket declares {declared} pages, file has {actual}")
+    return {
+        "renderedPages": total_pages,
+        "declaredPages": sum(v or 0 for v in declared_by.values()),
+        "images": images,
+        "ok": not errors,
+        "errors": errors,
+        "flags": flags,
+    }
