@@ -84,7 +84,7 @@ from .intake import (
     scaffold,
 )
 from .models import PdfEntry, SectionBoundary, unique_slug
-from .ocr import DEFAULT_OCR_DPI, make_ocr
+from .ocr import DEFAULT_OCR_DPI, make_lazy_ocr, make_ocr
 from .preservation import (
     PRESERVED_LEGAL_FIELDS,
     PRESERVED_REVIEW_METADATA_FIELDS,
