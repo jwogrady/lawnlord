@@ -87,6 +87,7 @@ let mode: "original" | "enhanced" =
 	"enhanced";
 let idx = 0;
 let origImage = ""; // the filing PDF shown in Original mode
+let origPage = 1; // which page of that PDF the viewer is parked on
 
 function esc(s: string): string {
 	return (s ?? "").replace(
@@ -195,11 +196,23 @@ function renderOriginal(): void {
       </button>`;
 		})
 		.join("");
+	const pp = cur?.filing?.declaredPages ?? 0;
+	if (origPage > pp) origPage = 1;
+	// one pill per declared PDF page — clicking parks the viewer on that page
+	const pagePills =
+		pp > 0
+			? `<div class="pages">${Array.from(
+					{ length: pp },
+					(_, i) =>
+						`<button class="pageitem${i + 1 === origPage ? " cur" : ""}" data-page="${i + 1}">p.${i + 1}</button>`,
+				).join("")}</div>`
+			: "";
 	const viewer = cur?.filing
 		? `<section class="score-bar"><span class="doc">${esc(cur.filing.title)}</span>
         <span class="pageid">${esc(cur.filing.image)} · ${cur.filing.declaredPages} pp · filed ${esc(cur.date)}</span></section>
+      ${pagePills}
       <section class="single"><figcaption>FILED DOCUMENT — original (court record)</figcaption>
-        <iframe class="pdf" src="/filings/${encodeURIComponent(cur.filing.image)}#view=FitH" title="${esc(cur.filing.title)}"></iframe></section>`
+        <iframe class="pdf" src="/filings/${encodeURIComponent(cur.filing.image)}#page=${origPage}&view=FitH" title="${esc(cur.filing.title)}"></iframe></section>`
 		: `<section class="score-bar"><span class="note">Select a filing from the register.</span></section>`;
 	app.innerHTML = `<aside class="docs"><div class="docs-h">Register of actions — ${esc(m.case)}</div>${roa}</aside>
     <section class="pane">${viewer}</section>`;
@@ -208,8 +221,15 @@ function renderOriginal(): void {
 			const image = (el as HTMLElement).dataset.image;
 			if (image) {
 				origImage = image;
+				origPage = 1; // new filing → back to its first page
 				render();
 			}
+		};
+	}
+	for (const el of app.querySelectorAll(".pageitem")) {
+		(el as HTMLButtonElement).onclick = () => {
+			origPage = Number((el as HTMLElement).dataset.page);
+			render();
 		};
 	}
 }
