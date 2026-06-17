@@ -73,3 +73,58 @@ def test_is_junk_bookmark_excludes_noise_keeps_real_titles():
     assert _is_junk_bookmark("Motion", -1) is True  # embedded / remote target
     assert _is_junk_bookmark("Motion for Summary Judgment", 1) is False
     assert _is_junk_bookmark("Exhibit A", 2) is False
+
+
+# ---------------------------------------------------------------------------
+# Additive-only invariant (issue #37): no overlay/proposal/verdict can mutate
+# the mirrored record or its generated provenance.
+# ---------------------------------------------------------------------------
+
+
+def test_overlay_never_mutates_generated_provenance():
+    provenance = {
+        "sha256": "abc123",
+        "sourcePageStart": 1,
+        "sourcePageEnd": 3,
+        "sectionSlug": "motion",
+        "detectionTier": "bookmarks",
+        "boundaryConfidence": 0.95,
+        "pdfPath": "sections/001-motion/pages/page-001.pdf",
+        "citation": {"lowLevel": "motion p.1"},
+    }
+    base = {**provenance, "status": "", "tags": []}
+    before = {k: base[k] for k in provenance}
+
+    hostile = {
+        # legitimate curated edits (whitelisted)
+        "status": "reviewed",
+        "tags": ["msj"],
+        # attempts to overwrite generated provenance — must be ignored
+        "sha256": "TAMPERED",
+        "sourcePageStart": 999,
+        "sectionSlug": "hacked",
+        "detectionTier": "manual",
+        "boundaryConfidence": 1.0,
+        "pdfPath": "/etc/passwd",
+        "citation": {"lowLevel": "fake"},
+        # injected analysis / verdict fields — not whitelisted
+        "legalSummary": "a conclusion",
+        "verdict": "accepted",
+    }
+    main.apply_metadata_overlay(base, hostile, main.ALLOWED_CURATED_FIELDS)
+
+    assert {k: base[k] for k in provenance} == before  # provenance byte-identical
+    assert base["status"] == "reviewed" and base["tags"] == ["msj"]  # allowed applied
+    assert "legalSummary" not in base and "verdict" not in base  # injections rejected
+
+
+def test_whitelist_is_the_single_chokepoint_excludes_provenance():
+    # The whitelist must never include a generated/provenance field, or an
+    # overlay could overwrite the mirrored record. This fails if one creeps in.
+    protected = {
+        "sha256", "sourcePageStart", "sourcePageEnd", "sectionId", "sectionSlug",
+        "documentSlug", "detectionTier", "boundaryConfidence", "sourcePdf",
+        "sourceText", "pdfPath", "textPath", "citation", "pageImagePath",
+        "pageImageSha256",
+    }
+    assert main.ALLOWED_CURATED_FIELDS.isdisjoint(protected)
