@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **F4 — re-level the index to the source-true `Image → Document` vocabulary.** The DuckDB index
+  now distinguishes an **image** (a filed PDF — Odyssey's own term) from the **documents within it**
+  (Motion, Exhibit A, Affidavit…). Tables re-leveled: `documents` → `images`, `document_events` →
+  `image_events`, and the old `sections` table → `documents` (the logical documents within an
+  image); `chunks` now carry both `image_id` and `document_id`. Query API renamed to match
+  (`images_by_phase/_event/_party`, `needs_review_documents`). Against the real `combo` case: 22
+  images → 37 documents → 255 pages; the 121-page MSJ image explodes into its 9 bookmarked documents
+  (Motion + Exhibits A–D + Affidavit), each a contiguous page range, junk bookmarks excluded. The
+  exploder's on-disk corpus keeps its "section" vocabulary; it is mapped to `documents` at the index
+  boundary. `SCHEMA_VERSION` → 2 (per-case DBs are regenerable; no migration). Design:
+  `docs/plans/v0.3.0-complete-truth-and-full-text.md`.
+
+- **`lawnlord assemble` — the lossless explode ↔ reassemble proof.** Reassemble a case's images
+  back into one master PDF from the **preserved original images** (immutable, hash-pinned), in
+  docket order, under a `FILING → IMAGE → DOC` outline (documents from each image's bookmarks, junk
+  references filtered), carrying embedded file attachments across. Writes a `*.manifest.json`
+  page→provenance sidecar and verifies page-for-page text fidelity, so "no context lost" is a
+  checked invariant, not a claim. Against the real `combo` case: 22 images → one 255-page master,
+  text-lossless, 61-entry outline, every page traceable to (image, source page). Design:
+  `docs/plans/v0.3.0-complete-truth-and-full-text.md`.
+
 - **Canonical case standard (`case.json`) + `lawnlord pack`.** Define the portable, versioned
   representation a provider adapter populates: `to_canonical(model)` / `from_canonical(dict)`
   round-trip a case losslessly through `case.json` (`SCHEMA_VERSION` 1.0). `lawnlord pack

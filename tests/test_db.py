@@ -3,8 +3,8 @@
 import lawnlord as main
 
 _M1_TABLES = {
-    "schema_meta", "cases", "parties", "events", "documents",
-    "document_events", "sections", "chunks", "knowledge_documents",
+    "schema_meta", "cases", "parties", "events", "images",
+    "image_events", "documents", "chunks", "knowledge_documents",
 }
 
 

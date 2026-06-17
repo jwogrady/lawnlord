@@ -18,13 +18,13 @@ def test_ingest_counts(ody_intake, tmp_path):
     assert stats["cases"] == 1
     assert stats["parties"] == 2
     assert stats["events"] == 3
-    assert stats["documents"] == 4
-    assert stats["skipped_documents"] == []
+    assert stats["images"] == 4
+    assert stats["skipped_images"] == []
     # Row counts in the DB match.
     assert con.execute("SELECT count(*) FROM cases").fetchone()[0] == 1
     assert con.execute("SELECT count(*) FROM parties").fetchone()[0] == 2
     assert con.execute("SELECT count(*) FROM events").fetchone()[0] == 3
-    assert con.execute("SELECT count(*) FROM documents").fetchone()[0] == 4
+    assert con.execute("SELECT count(*) FROM images").fetchone()[0] == 4
 
 
 def test_ingest_case_row_from_curated_identity(ody_intake, tmp_path):
@@ -40,27 +40,27 @@ def test_ingest_case_row_from_curated_identity(ody_intake, tmp_path):
     assert row[3] == GEN  # deterministic timestamp, not wall-clock
 
 
-def test_document_ids_match_exploder_scheme(ody_intake, tmp_path):
+def test_image_ids_match_exploder_scheme(ody_intake, tmp_path):
     case = main.Case.from_intake(ody_intake, case_dir=tmp_path / "out")
     con = _fresh_db(tmp_path)
     main.ingest_case(con, case, GEN)
-    for doc_id, sha in con.execute("SELECT id, sha256_hash FROM documents").fetchall():
-        assert doc_id == f"doc_{sha[:16]}"
+    for image_id, sha in con.execute("SELECT id, sha256_hash FROM images").fetchall():
+        assert image_id == f"doc_{sha[:16]}"
 
 
-def test_document_events_link_many_to_many(ody_intake, tmp_path):
+def test_image_events_link_many_to_many(ody_intake, tmp_path):
     case = main.Case.from_intake(ody_intake, case_dir=tmp_path / "out")
     con = _fresh_db(tmp_path)
     main.ingest_case(con, case, GEN)
-    # Each of the 3 timeline events references exactly one (present) document.
-    assert con.execute("SELECT count(*) FROM document_events").fetchone()[0] == 3
-    # The Motion document links to the MSJ event.
+    # Each of the 3 timeline events references exactly one (present) image.
+    assert con.execute("SELECT count(*) FROM image_events").fetchone()[0] == 3
+    # The Motion image links to the MSJ event.
     linked = con.execute(
         """
-        SELECT e.event_type FROM document_events de
-        JOIN documents d ON d.id = de.document_id
-        JOIN events e ON e.id = de.event_id
-        WHERE d.filename = 'Motion.pdf'
+        SELECT e.event_type FROM image_events ie
+        JOIN images i ON i.id = ie.image_id
+        JOIN events e ON e.id = ie.event_id
+        WHERE i.filename = 'Motion.pdf'
         """
     ).fetchone()
     assert linked[0] == "Motion for Summary Judgment"
@@ -71,7 +71,7 @@ def test_ingest_is_deterministic_and_rebuilds(ody_intake, tmp_path):
 
     def dump(con):
         out = {}
-        for t in ("cases", "parties", "events", "documents", "document_events"):
+        for t in ("cases", "parties", "events", "images", "image_events"):
             out[t] = con.execute(f"SELECT * FROM {t} ORDER BY ALL").fetchall()
         return out
 
@@ -117,9 +117,9 @@ def test_missing_pdf_is_skipped_not_fabricated(ody_intake, tmp_path):
     case = main.Case.from_intake(ody_intake, case_dir=tmp_path / "out")
     con = _fresh_db(tmp_path)
     stats = main.ingest_case(con, case, GEN)
-    assert "filings/Motion.pdf" in stats["skipped_documents"]
-    assert stats["documents"] == 3
+    assert "filings/Motion.pdf" in stats["skipped_images"]
+    assert stats["images"] == 3
     # No row with a missing/empty hash slipped in.
     assert con.execute(
-        "SELECT count(*) FROM documents WHERE sha256_hash IS NULL OR sha256_hash = ''"
+        "SELECT count(*) FROM images WHERE sha256_hash IS NULL OR sha256_hash = ''"
     ).fetchone()[0] == 0
