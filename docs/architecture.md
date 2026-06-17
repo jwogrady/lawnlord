@@ -57,7 +57,7 @@ Tables: `schema_meta`, `cases`, `parties`, `financials`, `financial_transactions
 `events`, `images`, `image_events`, `documents`, `chunks` (one row per page; FTS over `text`), and
 `knowledge_documents` (an unused stub). The DB is a derived, regenerable index — a pure function of
 the intake + corpus; it never authors content. Columns are documented in
-[`standard-schema.md`](standard-schema.md).
+[`schema.md`](schema.md).
 
 ## Enforced invariants
 

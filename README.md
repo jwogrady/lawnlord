@@ -101,11 +101,11 @@ standards and code summaries — each is kept current or deleted when no longer 
 
 **Code summaries** (provable by reading the source)
 - [`docs/architecture.md`](docs/architecture.md) — modules, data flow, the DuckDB schema, enforced invariants.
-- [`docs/standard-schema.md`](docs/standard-schema.md) — the canonical `case.json` + DuckDB schema as implemented.
+- [`docs/schema.md`](docs/schema.md) — the canonical `case.json` + DuckDB schema as implemented.
 - [`docs/ux.md`](docs/ux.md) — the CLI and user-facing behavior.
 
 **Why & how you use it**
-- [`docs/context.md`](docs/context.md) — the problem, the solution, and how you use it and benefit.
+- [`docs/motivation.md`](docs/motivation.md) — the problem, the solution, and how you use it and benefit.
 
 **Plan & history**
 - [`ROADMAP.md`](ROADMAP.md) — where we're going. The plan is the [GitHub issues](https://github.com/jwogrady/lawnlord/issues) assigned to each milestone; the roadmap narrates them.
