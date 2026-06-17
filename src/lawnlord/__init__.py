@@ -11,6 +11,9 @@ from __future__ import annotations
 
 from .analysis_schema import legal_analysis_placeholders, write_json
 from .archive import inspect_archive, inspect_folder, inspect_source, is_suspicious_entry
+from .canonical import SCHEMA_VERSION as CANONICAL_SCHEMA_VERSION
+from .canonical import from_canonical, to_canonical
+from .pack import pack_case
 from .boundaries import (
     CONFIDENCE_BOOKMARK,
     CONFIDENCE_FALLBACK,

@@ -27,6 +27,7 @@ from .index import index_corpus
 from .ingest import ingest_case
 from .intake import load_intake, resolve_packet, scaffold
 from .ocr import make_ocr
+from .pack import pack_case
 from .query import (
     documents_by_event,
     documents_by_party,
@@ -147,6 +148,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run OCR on the GPU (CUDA) when available; implies --ocr",
     )
 
+    p_pack = sub.add_parser(
+        "pack",
+        help="Package a case as the source of truth: case.json (all data) + filings (all files) in one zip",
+    )
+    p_pack.add_argument(
+        "intake",
+        nargs="?",
+        default=".",
+        help="Provider intake folder (e.g. .../intake/combo) with case JSON + filings/",
+    )
+    p_pack.add_argument(
+        "-o", "--output", default=None,
+        help="Output zip path (default: <caseNumber>.zip in the current directory)",
+    )
+
     p_query = sub.add_parser(
         "query", help="Read-only search over the case index (with provenance)"
     )
@@ -170,6 +186,25 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.command == "query":
         _run_query(args)
+        return
+
+    if args.command == "pack":
+        case = Case.from_intake(args.intake)
+        out_zip = Path(args.output) if args.output else Path.cwd() / f"{case.case_slug}.zip"
+        stats = pack_case(case, out_zip)
+        table = Table(title="Packed source of truth")
+        table.add_column("Metric")
+        table.add_column("Value", justify="right")
+        table.add_row("Case", case.case_number)
+        table.add_row("Provider", stats["provider"])
+        table.add_row("Documents", str(stats["documents"]))
+        table.add_row("Files packed", str(stats["packed"]))
+        table.add_row("Files missing", str(len(stats["missing"])))
+        table.add_row("Zip", stats["out_zip"])
+        console.print(table)
+        for rel in stats["missing"]:
+            console.print(f"[yellow]Missing source PDF (not packed):[/] {rel}")
+        console.print("[green]Done.[/]")
         return
 
     if args.command == "index":

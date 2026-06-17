@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Canonical case standard (`case.json`) + `lawnlord pack`.** Define the portable, versioned
+  representation a provider adapter populates: `to_canonical(model)` / `from_canonical(dict)`
+  round-trip a case losslessly through `case.json` (`SCHEMA_VERSION` 1.0). `lawnlord pack
+  <intake> [-o <zip>]` produces the shippable **source of truth** — one self-contained zip with
+  `case.json` (all the data) plus `filings/` (all the PDFs), where each document's `file` path is
+  the same path it sits at in the zip. Missing source PDFs are reported, not silently dropped.
 - **`combo` provider — cross-source merge.** Register the reconciled best-of-both intake (the
   recommended source of truth) as a first-class provider with its own `parse_combo` adapter. It
   takes the Odyssey export as the base (identity, parties, phase-tagged events, file-linked
