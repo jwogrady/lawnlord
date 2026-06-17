@@ -121,4 +121,11 @@ from .query import (
     search_text,
 )
 from .reporting import report_archive, write_boundary_template
+from .unify import (
+    find_gaps,
+    normalize_date,
+    present_sources,
+    source_provenance,
+    unify,
+)
 from .workspace import OUTPUT_SUBDIRS, Case

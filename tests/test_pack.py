@@ -28,7 +28,7 @@ def test_pack_produces_case_json_and_files(combo_intake, tmp_path):
     assert canonical["schemaVersion"] == main.CANONICAL_SCHEMA_VERSION
     model = main.from_canonical(canonical)
     assert model.identity.case_number == "99-00-12345"
-    assert model == case.model
+    assert model == main.unify(case.model)  # pack writes the unified standard
     # Every document's `file` resolves to a real entry inside the zip.
     with zipfile.ZipFile(out) as z:
         names = set(z.namelist())

@@ -29,8 +29,9 @@ from .providers import (
     Hearing,
     Party,
 )
+from .unify import find_gaps, present_sources, source_provenance
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "2.0"
 
 
 def _identity(identity: CaseIdentity) -> dict:
@@ -146,6 +147,12 @@ def to_canonical(model: CaseModel) -> dict:
         "caseFlags": list(model.case_flags),
         "caseCrossReferences": list(model.case_cross_references),
         "sourceNote": model.source_note,
+        # Derived (not model fields): which views supplied the record, per-field
+        # provenance, and the standard fields still missing. from_canonical
+        # ignores these, so the model round-trip stays lossless.
+        "sources": present_sources(model),
+        "provenance": source_provenance(model),
+        "gaps": find_gaps(model),
     }
 
 

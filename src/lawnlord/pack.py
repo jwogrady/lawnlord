@@ -17,6 +17,7 @@ import zipfile
 from pathlib import Path
 
 from .canonical import to_canonical
+from .unify import unify
 from .workspace import Case
 
 CASE_JSON_NAME = "case.json"
@@ -31,7 +32,8 @@ def pack_case(case: Case, out_zip: str | Path) -> dict:
     """
     out_zip = Path(out_zip)
     out_zip.parent.mkdir(parents=True, exist_ok=True)
-    canonical = to_canonical(case.model)
+    # Pack the standard (normalized) view: ISO dates, source provenance, gaps.
+    canonical = to_canonical(unify(case.model))
 
     packed: list[str] = []
     missing: list[str] = []
