@@ -12,6 +12,10 @@ self-describing and round-trips losslessly:
 
 ``case.json`` is "all the data"; the packed source-of-truth zip pairs it with
 ``files/`` (all the PDFs). Bump SCHEMA_VERSION on any incompatible field change.
+
+Vocabulary note: ``documents[]`` here are the **filed PDFs** — an *image* in the
+DuckDB index vocabulary, not the documents-*within*-an-image. See the glossary
+in docs/schema.md.
 """
 
 from __future__ import annotations

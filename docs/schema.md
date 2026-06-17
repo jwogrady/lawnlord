@@ -9,6 +9,24 @@ Lawnlord mirrors the court record from the Odyssey (`ody`) and re:SearchTX (`txe
 canonical `case.json`. The two portals are two views of the same record; lawnlord normalizes them
 into one shape and tags which source supplied each field.
 
+## Vocabulary
+
+One word — *document* — means different things in different layers; this glossary is canonical, and
+each layer maps to it. (Issue #35.)
+
+| Canonical term | Meaning | `case.json` (`canonical.py`) | DuckDB index (`db.py`) | on-disk corpus (`corpus.py`) |
+|---|---|---|---|---|
+| **case** | the lawsuit | `case` | `cases` | `archive` |
+| **event** | a docket entry / filing | `events`, `docket` | `events` | — |
+| **image** | a **filed PDF** (the court's leaf) | `documents[]` ⚠️ | `images` | `submissions/<…>/documents/<…>` |
+| **document** | a logical document *within* an image (Motion, Exhibit A, Affidavit) — `section == document` (#34) | — *(not serialized)* | `documents` | `sections/<…>` |
+| **page** | a page of a document | — | `chunks` (one row per page) | `pages/`, `text/` |
+
+⚠️ **The collision.** `case.json`'s `documents[]` are the **filed PDFs** — *images* in the index
+vocabulary — **not** the index's `documents` (the logical documents *within* an image). When reading
+`case.json`, treat `documents[]` as images. Renaming `case.json`'s `documents[]` → `images[]` to remove
+the collision outright is a deferred schema change; until then, this mapping is the contract.
+
 ## `case.json` (`schemaVersion` `"2.0"`, `canonical.py`)
 
 Root keys: `schemaVersion`, `provider`, `case`, `parties`, `financials` (nullable), `hearings`,
