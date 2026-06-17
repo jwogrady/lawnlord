@@ -40,8 +40,15 @@ body {
 	z-index: 5;
 }
 #bar .title {
+	display: flex;
+	align-items: center;
+	gap: 10px;
 	font-weight: 700;
 	letter-spacing: 0.2px;
+}
+#bar .logo {
+	height: 34px;
+	width: auto;
 }
 #bar .progress {
 	color: var(--muted);

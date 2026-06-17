@@ -58,6 +58,9 @@ const server = Bun.serve({
 	// Serve the per-page images (actual + reconstructed renders) from the artifact.
 	async fetch(req) {
 		const url = new URL(req.url);
+		if (url.pathname === "/lawnlord.png") {
+			return new Response(Bun.file(join(import.meta.dir, "lawnlord.png")));
+		}
 		if (url.pathname.startsWith("/images/")) {
 			const file = Bun.file(join(COMPARE_DIR, url.pathname));
 			if (await file.exists()) return new Response(file);
