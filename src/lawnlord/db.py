@@ -163,3 +163,21 @@ def apply_schema(con: duckdb.DuckDBPyConnection) -> None:
     row = con.execute("SELECT count(*) FROM schema_meta").fetchone()
     if row[0] == 0:
         con.execute("INSERT INTO schema_meta (version) VALUES (?)", [SCHEMA_VERSION])
+
+
+def load_fts(con: duckdb.DuckDBPyConnection) -> bool:
+    """Best-effort load of the DuckDB full-text-search extension. Returns True if
+    it is available. ``LOAD`` alone suffices once installed (and works offline);
+    ``INSTALL`` needs network the first time only. Failure is non-fatal — callers
+    fall back to a substring scan, so search always works."""
+    try:
+        con.execute("LOAD fts")
+        return True
+    except Exception:
+        pass
+    try:
+        con.execute("INSTALL fts")
+        con.execute("LOAD fts")
+        return True
+    except Exception:
+        return False
