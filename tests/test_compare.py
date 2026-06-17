@@ -6,7 +6,7 @@ import json
 import fitz
 
 import lawnlord as main
-from lawnlord.compare import emit_compare
+from lawnlord.compare import _reconcile, emit_compare
 
 
 def _intake(tmp_path):
@@ -47,7 +47,28 @@ def test_emit_compare_renders_pages_scores_and_json(tmp_path):
         assert (out / p["reconstructed"].lstrip("/")).exists()
         assert 0.0 <= p["score"] <= 1.0
         assert p["note"]
-        # each page knows its document/exhibit (#69) so the reviewer groups by it
-        assert p["document"]["id"] and p["document"]["title"]
+        # the court's structure: case -> filing (submission event) -> image
+        assert p["filing"]["title"] and p["image"].endswith(".pdf")
+        assert p["declaredPages"] == 2 and p["page"] in (1, 2)
+        # "document" is additive (a part/exhibit) — present or null, never the root
+        assert p["document"] is None or "title" in p["document"]
+    # output reconciles with the manifest: 2 rendered == 2 declared, no drops
+    assert data["integrity"]["ok"] is True and not data["integrity"]["errors"]
+    assert data["integrity"]["renderedPages"] == 2
     # native text + declared(2)==actual(2) + docketed -> full confidence
     assert data["pages"][0]["score"] == 1.0
+
+
+def test_reconcile_errors_on_a_dropped_page():
+    # We hold 3 source pages but only rendered 2 -> a real drop, hard error.
+    integ = _reconcile({"a.pdf": {1, 2}}, {"a.pdf": 3}, {"a.pdf": 3}, 2)
+    assert integ["ok"] is False
+    assert any("rendered 2 of 3" in e for e in integ["errors"])
+
+
+def test_reconcile_flags_docket_vs_file_mismatch():
+    # All file pages rendered, but the docket's declared count disagrees -> a
+    # finding (flag), not a tool failure.
+    integ = _reconcile({"a.pdf": {1, 2, 3}}, {"a.pdf": 5}, {"a.pdf": 3}, 3)
+    assert integ["ok"] is True and not integ["errors"]
+    assert any("docket declares 5" in f for f in integ["flags"])

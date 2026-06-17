@@ -1,25 +1,51 @@
 {
 	"case": "00-00-00000 (sample — not a real case)",
+	"integrity": {
+		"renderedPages": 2,
+		"declaredPages": 2,
+		"images": [
+			{ "image": "Petition.pdf", "rendered": 2, "actual": 2, "declared": 2 }
+		],
+		"ok": true,
+		"errors": [],
+		"flags": []
+	},
 	"pages": [
 		{
-			"id": "petition_p1",
+			"id": "Petition_p1",
+			"filing": {
+				"title": "Plaintiff's Original Petition",
+				"type": "Original Petition",
+				"date": "2025-09-05"
+			},
 			"image": "Petition.pdf",
+			"declaredPages": 2,
+			"actualPages": 2,
+			"mismatch": false,
 			"page": 1,
-			"document": { "id": "petition", "title": "Plaintiff's Original Petition", "family": "petition", "pageStart": 1, "pageEnd": 1 },
+			"document": null,
 			"actual": "/images/p1-actual.svg",
 			"reconstructed": "/images/p1-recon.svg",
-			"score": 0.92,
-			"note": "Native text layer; declared page count matches actual. High confidence."
+			"score": 1.0,
+			"note": "Native text layer; declared page count matches. High confidence."
 		},
 		{
-			"id": "petition_p2",
+			"id": "Petition_p2",
+			"filing": {
+				"title": "Plaintiff's Original Petition",
+				"type": "Original Petition",
+				"date": "2025-09-05"
+			},
 			"image": "Petition.pdf",
+			"declaredPages": 2,
+			"actualPages": 2,
+			"mismatch": false,
 			"page": 2,
-			"document": { "id": "exhibit_a", "title": "Exhibit A — Assessment Ledger", "family": "exhibit", "pageStart": 2, "pageEnd": 2 },
+			"document": { "title": "Certificate of Service", "family": "certificate-of-service" },
 			"actual": "/images/p2-actual.svg",
 			"reconstructed": "/images/p2-recon.svg",
-			"score": 0.5,
-			"note": "Scanned page; text recovered via OCR — one line is uncertain. Verify."
+			"score": 0.82,
+			"note": "Text recovered via OCR — verify against the image."
 		}
 	]
 }

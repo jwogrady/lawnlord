@@ -1,9 +1,10 @@
-// Document/exhibit review workflow (#69): the case is grouped into its filed
-// documents and exhibits (Motion, Exhibit B, the Affidavit) — the unit you
-// litigate at. Pick one in the sidebar, then page through it comparing actual
-// vs reconstructed: see lawnlord's score + note, rate (good–bad), note, flag.
-// Completing a page marks it human-reviewed; the gap vs lawnlord's score is the
-// point.
+// Page-by-page review over the case's TRUE structure: case → filing → image →
+// page. A "filing" is the submission event the court records (from the
+// metadata); an image is the filed PDF. The left rail is the case table of
+// contents at that level. Boundary-detected "documents" are ADDITIVE analysis
+// (an exhibit/part label on a page) — never the organizing root. lawnlord's
+// score + note ride on top; rate (good–bad), note, flag → human-reviewed. The
+// gap vs lawnlord's score is the point.
 
 type Review = {
 	rating: number;
@@ -12,19 +13,18 @@ type Review = {
 	reviewed: boolean;
 } | null;
 
-type Doc = {
-	id: string;
-	title: string;
-	family: string;
-	pageStart: number | null;
-	pageEnd: number | null;
-};
+type Filing = { title: string; type: string; date: string };
+type DocPart = { title: string; family: string } | null;
 
 type Page = {
 	id: string;
+	filing: Filing;
 	image: string;
+	declaredPages: number | null;
+	actualPages: number | null;
+	mismatch: boolean;
 	page: number;
-	document: Doc;
+	document: DocPart; // additive: the sub-unit (exhibit/part) this page is in
 	actual: string;
 	reconstructed: string;
 	score: number; // lawnlord confidence, 0..1
@@ -32,7 +32,21 @@ type Page = {
 	review: Review;
 };
 
-type Data = { case: string; pages: Page[] };
+type Integrity = {
+	renderedPages: number;
+	declaredPages: number;
+	images: {
+		image: string;
+		rendered: number;
+		actual: number;
+		declared: number;
+	}[];
+	ok: boolean;
+	errors: string[];
+	flags: string[];
+};
+
+type Data = { case: string; integrity?: Integrity; pages: Page[] };
 
 const app = document.getElementById("app") as HTMLElement;
 const progressEl = document.getElementById("progress") as HTMLElement;
@@ -52,24 +66,38 @@ function reviewedCount(): number {
 	return data.pages.filter((p) => p.review?.reviewed).length;
 }
 
-type DocGroup = {
-	doc: Doc;
+// One group per filed image (case → filing → image). Each carries the rendered
+// vs declared page counts so the TOC shows whether the output matches the docket.
+type FilingGroup = {
+	filing: Filing;
+	image: string;
+	declared: number | null;
+	rendered: number;
+	mismatch: boolean;
 	first: number;
-	total: number;
 	reviewed: number;
 	idxs: number[];
 };
 
-function docGroups(): DocGroup[] {
-	const out: DocGroup[] = [];
+function filingGroups(): FilingGroup[] {
+	const out: FilingGroup[] = [];
 	const at = new Map<string, number>();
 	data.pages.forEach((p, i) => {
-		if (!at.has(p.document.id)) {
-			at.set(p.document.id, out.length);
-			out.push({ doc: p.document, first: i, total: 0, reviewed: 0, idxs: [] });
+		if (!at.has(p.image)) {
+			at.set(p.image, out.length);
+			out.push({
+				filing: p.filing,
+				image: p.image,
+				declared: p.declaredPages,
+				rendered: 0,
+				mismatch: p.mismatch,
+				first: i,
+				reviewed: 0,
+				idxs: [],
+			});
 		}
-		const g = out[at.get(p.document.id) as number];
-		g.total++;
+		const g = out[at.get(p.image) as number];
+		g.rendered++;
 		g.idxs.push(i);
 		if (p.review?.reviewed) g.reviewed++;
 	});
@@ -89,20 +117,21 @@ function render(): void {
 	const rating = p.review ? p.review.rating : myScore; // default to lawnlord's
 	progressEl.textContent = `${reviewedCount()} / ${data.pages.length} reviewed · ${data.case}`;
 
-	// The left rail is the case's table of contents: every filed document in
-	// docket order, the current one expanded into its pages so you can jump to
-	// any page and see its review status at a glance.
-	const sidebar = docGroups()
+	// The left rail is the case TOC at the court's level: filing → image. The
+	// current filing expands into its pages; a count mismatch is flagged here.
+	const sidebar = filingGroups()
 		.map((g, n) => {
-			const isCur = g.doc.id === p.document.id;
+			const isCur = g.image === p.image;
 			const cur = isCur ? " cur" : "";
-			const done = g.reviewed === g.total ? " done" : "";
-			const fam = g.doc.family
-				? `<span class="fam">${esc(g.doc.family)}</span>`
+			const done = g.reviewed === g.rendered ? " done" : "";
+			const type = g.filing.type
+				? `<span class="fam">${esc(g.filing.type)}</span>`
 				: "";
-			const range = g.doc.pageStart
-				? `p.${g.doc.pageStart}–${g.doc.pageEnd}`
-				: "";
+			// rendered vs declared — flagged when they disagree (never hidden)
+			const count =
+				g.declared != null && g.declared !== g.rendered
+					? `<span class="flagcount">${g.rendered}/${g.declared} pp ⚑</span>`
+					: `${g.rendered} pp`;
 			const pages = isCur
 				? `<div class="pages">${g.idxs
 						.map((gi) => {
@@ -116,20 +145,36 @@ function render(): void {
 											? " done"
 											: "";
 							const mk = pp.review?.flag ? "⚑" : pp.review?.reviewed ? "✓" : "";
-							return `<button class="pageitem${st}" data-idx="${gi}">p.${pp.page}<span class="mk">${mk}</span></button>`;
+							return `<button class="pageitem${st}" data-idx="${gi}" title="${esc(pp.document?.title ?? "")}">p.${pp.page}<span class="mk">${mk}</span></button>`;
 						})
 						.join("")}</div>`
 				: "";
 			return `<button class="docitem${cur}${done}" data-first="${g.first}">
-        <span class="doctitle"><span class="docn">${n + 1}.</span> ${esc(g.doc.title)}</span>
-        <span class="docmeta">${fam}${range} · ${g.reviewed}/${g.total}</span>
+        <span class="doctitle"><span class="docn">${n + 1}.</span> ${esc(g.filing.title)}</span>
+        <span class="docmeta">${type}${esc(g.filing.date)} · ${count} · ${g.reviewed}/${g.rendered}</span>
       </button>${pages}`;
 		})
 		.join("");
 
-	const famBadge = p.document.family
-		? `<span class="fam">${esc(p.document.family)}</span>`
+	const typeBadge = p.filing.type
+		? `<span class="fam">${esc(p.filing.type)}</span>`
 		: "";
+	// additive: the detected sub-unit (exhibit/part), shown as an annotation only
+	// — and only when it's genuinely distinct from the filing (not the allcaps
+	// echo of the filing's own name).
+	const norm = (s: string) => (s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+	const part =
+		p.document && norm(p.document.title) !== norm(p.filing.title)
+			? `<span class="part">part: ${esc(p.document.title)}</span>`
+			: "";
+	const cnt =
+		p.declaredPages != null
+			? `p.${p.page} of ${p.actualPages ?? "?"}${
+					p.declaredPages !== p.actualPages
+						? ` ⚑ docket says ${p.declaredPages}`
+						: ""
+				}`
+			: `p.${p.page}`;
 	app.innerHTML = `
     <aside class="docs">
       <div class="docs-h">Case contents — ${esc(data.case)}</div>
@@ -137,10 +182,11 @@ function render(): void {
     </aside>
     <section class="pane">
       <section class="score-bar${p.review?.reviewed ? " done" : ""}">
-        <span class="doc">${esc(p.document.title)} ${famBadge}</span>
+        <span class="doc">${esc(p.filing.title)} ${typeBadge}</span>
+        ${part}
         <span class="score">lawnlord <b>${myScore}</b>/100</span>
         <span class="note">${esc(p.note)}</span>
-        <span class="pageid">${esc(p.image)} · p.${p.page}${p.review?.reviewed ? " · ✓ reviewed" : ""}</span>
+        <span class="pageid">${esc(p.image)} · ${cnt}${p.review?.reviewed ? " · ✓ reviewed" : ""}</span>
       </section>
       <section class="compare">
         <figure><figcaption>ACTUAL — original filing</figcaption><img src="${p.actual}" alt="actual page" /></figure>

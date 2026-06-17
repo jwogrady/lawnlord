@@ -393,6 +393,11 @@ def _main(argv: list[str] | None = None) -> None:
         table.add_row("Pages rendered", str(stats["pages"]))
         table.add_row("Out", stats["out"])
         console.print(table)
+        if stats.get("flags"):
+            console.print(
+                f"[yellow]⚑ {stats['flags']} page-count flag(s):[/] docket vs file "
+                "disagree — see integrity in compare.json."
+            )
         console.print(
             f"[green]Done.[/] View it: "
             f"[bold]cd web && COMPARE_DIR={out.resolve()} bun dev[/]"
