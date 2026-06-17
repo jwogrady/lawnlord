@@ -24,6 +24,7 @@ from pathlib import Path
 
 import duckdb
 
+from .dates import extract_dates
 from .hashing import sha256_file
 from .workspace import Case
 
@@ -58,6 +59,7 @@ def index_corpus(
         # Drop-and-rebuild this case's corpus rows (idempotent re-index).
         con.execute("DELETE FROM chunks WHERE case_id = ?", [case_id])
         con.execute("DELETE FROM documents WHERE case_id = ?", [case_id])
+        con.execute("DELETE FROM extracted_dates WHERE case_id = ?", [case_id])
         stats = _index_documents(con, manifest, corpus_dir, case_id, generated_at)
         con.execute("COMMIT")
     except Exception:
@@ -96,6 +98,7 @@ def _index_documents(
     within its image. Raises ValueError on broken page coverage."""
     documents_n = 0
     chunks_n = 0
+    dates_n = 0
     images_indexed = 0
     orphan_images = 0
     mismatches: list[dict] = []
@@ -227,9 +230,30 @@ def _index_documents(
                     )
                     chunks_n += 1
 
+                    # Date-bearing facts on this page (#36). Facts, not
+                    # interpretations: every row is flagged needs_review.
+                    for di, fact in enumerate(extract_dates(text), start=1):
+                        con.execute(
+                            """
+                            INSERT INTO extracted_dates (id, case_id, image_id,
+                                document_id, source_page_number, date, raw_text,
+                                snippet, text_span_start, text_span_end,
+                                confidence, source, needs_review, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'extracted', TRUE, ?)
+                            """,
+                            [
+                                f"{document_id}_p{spn}_d{di}", case_id, image_id,
+                                document_id, spn, fact["date"], fact["raw"],
+                                fact["snippet"], fact["spanStart"], fact["spanEnd"],
+                                fact["confidence"], generated_at,
+                            ],
+                        )
+                        dates_n += 1
+
     return {
         "documents": documents_n,
         "chunks": chunks_n,
+        "dates": dates_n,
         "images_indexed": images_indexed,
         "orphan_images": orphan_images,
         "mismatches": mismatches,

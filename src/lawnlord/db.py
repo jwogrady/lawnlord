@@ -27,9 +27,11 @@ import duckdb
 # Per-case DBs are regenerable, so the bump needs no in-place migration.
 # v4: chunks carry the page's text provenance (text_source, ocr_confidence) and
 # a pointer to its preserved page image (page_image_path + page_image_sha256),
-# so a page is reconstructable from the data alone (#31). Per-case DBs are
-# regenerable, so the bump needs no in-place migration.
-SCHEMA_VERSION = 4
+# so a page is reconstructable from the data alone (#31).
+# v5: extracted_dates holds date-bearing facts found in page text (#36) — facts,
+# not interpretations; every row is needs_review. Per-case DBs are regenerable,
+# so the bumps need no in-place migration.
+SCHEMA_VERSION = 5
 
 # One statement per table; CREATE ... IF NOT EXISTS keeps apply_schema idempotent.
 _SCHEMA_STATEMENTS = (
@@ -168,6 +170,24 @@ _SCHEMA_STATEMENTS = (
         ocr_confidence DOUBLE,
         page_image_path TEXT,
         page_image_sha256 TEXT,
+        created_at TEXT
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS extracted_dates (
+        id TEXT PRIMARY KEY,
+        case_id TEXT NOT NULL,
+        image_id TEXT NOT NULL,
+        document_id TEXT NOT NULL,
+        source_page_number INTEGER,
+        date TEXT,
+        raw_text TEXT,
+        snippet TEXT,
+        text_span_start INTEGER,
+        text_span_end INTEGER,
+        confidence DOUBLE,
+        source TEXT,
+        needs_review BOOLEAN,
         created_at TEXT
     )
     """,
