@@ -7,6 +7,7 @@
     lawnlord index [intake]            explode + ingest + index into DuckDB
     lawnlord pack [intake]             package case.json + filings as the source of truth
     lawnlord assemble [intake]         reassemble images into one master PDF (round-trip proof)
+    lawnlord bundle [intake]           wrap the complete case (metadata + master + pages + index) into one zip
     lawnlord query                     read-only search over the index (with provenance)
 
 ``root`` defaults to the current directory; lawnlord resolves the intake/corpus
@@ -23,6 +24,7 @@ from rich.table import Table
 
 from .archive import inspect_source
 from .assemble import assemble_case
+from .bundle import bundle_case
 from .boundaries import load_manual_boundaries
 from .console import console
 from .corpus import write_corpus
@@ -186,6 +188,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output master PDF path (default: <caseNumber>-master.pdf in the current directory)",
     )
 
+    p_bundle = sub.add_parser(
+        "bundle",
+        help="The capstone: wrap the complete case (metadata + master PDF + pages + index) into one self-contained zip",
+    )
+    p_bundle.add_argument(
+        "intake",
+        nargs="?",
+        default=".",
+        help="Provider intake folder (e.g. .../intake/combo) with case JSON + filings/",
+    )
+    p_bundle.add_argument(
+        "-o", "--output", default=None,
+        help="Output bundle zip (default: <caseNumber>.bundle.zip in the current directory)",
+    )
+
     p_query = sub.add_parser(
         "query", help="Read-only search over the case index (with provenance)"
     )
@@ -227,6 +244,34 @@ def main(argv: list[str] | None = None) -> None:
         console.print(table)
         for rel in stats["missing"]:
             console.print(f"[yellow]Missing source PDF (not packed):[/] {rel}")
+        console.print("[green]Done.[/]")
+        return
+
+    if args.command == "bundle":
+        case = Case.from_intake(args.intake)
+        out_zip = (
+            Path(args.output) if args.output
+            else Path.cwd() / f"{case.case_slug}.bundle.zip"
+        )
+        stats = bundle_case(case, out_zip)
+        table = Table(title="Case bundle (the capstone)")
+        table.add_column("Metric")
+        table.add_column("Value", justify="right")
+        table.add_row("Case", case.case_number)
+        table.add_row("Images (preserved)", str(stats["images"]))
+        table.add_row("Pages (searchable text)", str(stats["pages"]))
+        table.add_row("Master PDF pages", str(stats["master_pages"]))
+
+        def _flag(v):
+            return "[green]yes[/]" if v else "[red]NO[/]" if v is False else "n/a"
+
+        table.add_row("Text-lossless", _flag(stats["text_lossless"]))
+        table.add_row("Visual-lossless", _flag(stats["visual_lossless"]))
+        table.add_row("Missing images", str(len(stats["missing"])))
+        table.add_row("Bundle", stats["out_zip"])
+        console.print(table)
+        for rel in stats["missing"]:
+            console.print(f"[yellow]Missing source image (not bundled):[/] {rel}")
         console.print("[green]Done.[/]")
         return
 
