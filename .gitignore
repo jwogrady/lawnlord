@@ -22,3 +22,14 @@ intake/
 
 # case-workspace config scaffolded by `lawnlord start` — belongs in a case repo, not here
 lawnlord.toml
+
+# Generated case artifacts when a command is run from the repo root (the derived,
+# regenerable index + outputs). Case data and its derivatives never live here.
+lawnlord.duckdb
+compare/
+artifacts/
+knowledgebase/
+extracted/
+analysis/
+outputs/
+manifests/
