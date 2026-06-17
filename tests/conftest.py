@@ -132,7 +132,8 @@ def ody_intake(tmp_path):
     adapter. Holds the four metadata JSON files and an (empty) ``filings/`` dir.
     """
     intake = tmp_path / "ody"
-    (intake / "filings").mkdir(parents=True)
+    filings = intake / "filings"
+    filings.mkdir(parents=True)
     for name, payload in (
         ("case-summary.json", _CASE_SUMMARY),
         ("case-history.json", _CASE_HISTORY),
@@ -140,4 +141,8 @@ def ody_intake(tmp_path):
         ("filings.json", _FILINGS),
     ):
         (intake / name).write_text(json.dumps(payload), encoding="utf-8")
+    # Dummy source PDFs (distinct bytes -> distinct sha256) for the files the
+    # docket references, so the ingest step can hash them into document IDs.
+    for pdf in ("Final_Judgment.pdf", "Petition.pdf", "Motion.pdf", "Citation.pdf"):
+        (filings / pdf).write_bytes(f"%PDF-1.4 {pdf}".encode("utf-8"))
     return intake
