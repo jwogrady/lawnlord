@@ -1,10 +1,12 @@
 """OCR hook: scanned (empty-text) pages get a tagged, recovered text layer."""
 
+import argparse
 import json
 
 import fitz
 
 import lawnlord as main
+from lawnlord import cli
 
 
 def _mixed_pdf_folder(tmp_path):
@@ -87,3 +89,41 @@ def test_make_ocr_gpu_path_is_safe():
     # warned CPU fallback (never raises just because there's no GPU).
     ocr = main.make_ocr(use_gpu=True)
     assert callable(ocr)
+
+
+# --- F5a: OCR on by default, lazy, graceful ---------------------------------
+
+
+def test_ocr_is_on_by_default_and_no_ocr_disables():
+    # The build wires OCR ON by default (a lazy backend); --no-ocr opts out.
+    on = cli._ocr_for(argparse.Namespace(no_ocr=False, gpu=False))
+    off = cli._ocr_for(argparse.Namespace(no_ocr=True, gpu=False))
+    assert callable(on)
+    assert off is None
+
+
+def test_lazy_ocr_degrades_when_extra_missing(monkeypatch):
+    # If the engine can't be built (the 'ocr' extra is missing), the lazy
+    # backend warns once and returns empty — it never raises into the build.
+    def boom(*a, **k):
+        raise RuntimeError("ocr extra missing")
+
+    monkeypatch.setattr("lawnlord.ocr.make_ocr", boom)
+    ocr = main.make_lazy_ocr()
+    doc = fitz.open()
+    doc.new_page()
+    assert ocr(doc[0]) == ("", None)
+    assert ocr(doc[0]) == ("", None)  # still safe after disabling
+    doc.close()
+
+
+def test_empty_ocr_result_leaves_page_native(tmp_path):
+    # A degraded/empty OCR result must NOT mislabel the page as textSource=ocr;
+    # it stays native + empty (and is flagged for review elsewhere).
+    folder = _mixed_pdf_folder(tmp_path)
+    corpus = tmp_path / "corpus"
+    main.write_corpus(folder, corpus, force=False, manual_boundaries={}, curation={},
+                      ocr=lambda page: ("", None))
+    analyses = _analyses(corpus)
+    assert analyses["page-002.json"]["textSource"] == "native"
+    assert analyses["page-002.json"]["ocrConfidence"] is None
