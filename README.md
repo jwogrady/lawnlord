@@ -93,24 +93,23 @@ behavior change to approve by hand, not to silently update.
 
 ## Documentation
 
-Background and reference (each linked here, the canonical entry point):
+This README is the project's homepage and present state. The documents below are the project's
+standards and code summaries — each is kept current or deleted when no longer relevant.
 
-- [`docs/standard-schema.md`](docs/standard-schema.md) — the standard court-record schema (the mirrored "what is", down to the image).
-- [`docs/context.md`](docs/context.md) — why lawnlord exists (problem & solution) and how you use it and benefit.
-- [`docs/architecture.md`](docs/architecture.md) — target architecture (background vision).
-- [`docs/ux.md`](docs/ux.md) — product north star (experience principles).
+**How we work**
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — the doc model, conventions, and non-negotiable engineering invariants.
 
-## Contributing
+**Code summaries** (provable by reading the source)
+- [`docs/architecture.md`](docs/architecture.md) — modules, data flow, the DuckDB schema, enforced invariants.
+- [`docs/standard-schema.md`](docs/standard-schema.md) — the canonical `case.json` + DuckDB schema as implemented.
+- [`docs/ux.md`](docs/ux.md) — the CLI and user-facing behavior.
 
-The working conventions, doc model, and non-negotiable engineering invariants are in
-[`CONTRIBUTING.md`](CONTRIBUTING.md).
+**Why & how you use it**
+- [`docs/context.md`](docs/context.md) — the problem, the solution, and how you use it and benefit.
 
-## Roadmap & history
-
-- **Where we're going:** [ROADMAP.md](ROADMAP.md). The plan itself is the
-  [GitHub issues](https://github.com/jwogrady/lawnlord/issues) assigned to each milestone; the
-  roadmap narrates them.
-- **Where we've been:** [CHANGELOG.md](CHANGELOG.md).
+**Plan & history**
+- [`ROADMAP.md`](ROADMAP.md) — where we're going. The plan is the [GitHub issues](https://github.com/jwogrady/lawnlord/issues) assigned to each milestone; the roadmap narrates them.
+- [`CHANGELOG.md`](CHANGELOG.md) — where we've been.
 
 ## License
 

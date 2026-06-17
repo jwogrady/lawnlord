@@ -30,6 +30,13 @@ contributors or released.
   its roadmap entries graduate to the changelog, carrying the same issue/milestone links across the
   boundary.
 - **LICENSE** = most restrictive until the project is opened to contributors or released.
+- **README is the homepage / present state**, with links to every other doc.
+- **`docs/` holds standards and code summaries, kept current or deleted.** `docs/architecture.md`,
+  `docs/standard-schema.md`, and `docs/ux.md` are **developer code summaries** — every claim must be
+  provable by reading the cited code; if a doc and the code disagree, the **code wins**.
+  `docs/context.md` is the why (problem & solution) + how the customer uses it and benefits.
+- **Aspirational / future design goes on the ROADMAP**, never in the code summaries (and is deleted
+  from a doc once it no longer reflects reality).
 
 ## Issues, milestones, the plan
 
