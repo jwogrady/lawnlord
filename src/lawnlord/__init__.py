@@ -105,6 +105,7 @@ from .providers import (
     DocumentRef,
     Event,
     Financials,
+    FinancialTransaction,
     Hearing,
     Party,
     case_slug,
