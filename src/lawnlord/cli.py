@@ -244,12 +244,24 @@ def main(argv: list[str] | None = None) -> None:
         table.add_row("Images", str(stats["images"]))
         table.add_row("Pages", str(stats["pages"]))
         table.add_row("Outline entries", str(stats["outline_entries"]))
-        table.add_row("Embedded attachments carried", str(stats["embedded_attachments"]))
-        table.add_row("Missing images", str(len(stats["missing"])))
-        lossless = stats["text_lossless"]
         table.add_row(
-            "Text-lossless round-trip",
-            "[green]yes[/]" if lossless else "[red]NO[/]" if lossless is False else "n/a",
+            "Embedded attachments",
+            f"{stats['embedded_attachments']}/{stats['embedded_source']} carried",
+        )
+        table.add_row(
+            "Annotations",
+            f"{stats['annotations_master']}/{stats['annotations_source']} preserved",
+        )
+        table.add_row("Missing images", str(len(stats["missing"])))
+
+        def _flag(v):
+            return "[green]yes[/]" if v else "[red]NO[/]" if v is False else "n/a"
+
+        table.add_row("Text-lossless round-trip", _flag(stats["text_lossless"]))
+        vis = stats["visual_lossless"]
+        table.add_row(
+            "Visual-lossless round-trip",
+            _flag(vis) + (f" (Δ {stats['visual_worst_diff']})" if vis is not None else ""),
         )
         table.add_row("Master PDF", stats["out_pdf"])
         table.add_row("Manifest", stats["manifest"])

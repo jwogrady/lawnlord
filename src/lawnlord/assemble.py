@@ -28,6 +28,15 @@ import fitz  # pymupdf
 
 from .workspace import Case
 
+# Visual-fidelity check: render pages at this DPI and require the mean absolute
+# per-channel pixel difference between each source page and its master page to
+# stay under the tolerance. insert_pdf is not bit-identical (it rewrites the
+# file), but content is preserved — observed worst mean|Δ| ~0.07/255 from
+# anti-aliasing on tagged pages, so a tolerance of 2.0 flags real corruption
+# (a dropped/garbled page scores in the tens) while ignoring rendering noise.
+VERIFY_DPI = 100
+VISUAL_TOLERANCE = 2.0
+
 
 def _is_junk_bookmark(title: str, page: int) -> bool:
     """Bookmarks that are not real documents-within-the-image: embedded-file
@@ -81,6 +90,49 @@ def _carry_embedded_files(master: fitz.Document, src: fitz.Document, image_name:
     return carried
 
 
+def _verify_visual(
+    case: Case, ordered: list[str], master_path: Path, page_count: int
+) -> tuple[bool | None, float]:
+    """Render each source page and its master page and compare them within
+    ``VISUAL_TOLERANCE``. Returns (visual_lossless, worst_mean_diff). Best-effort:
+    returns (None, 0.0) when numpy is unavailable (the text round-trip still
+    holds) — visual verification needs array math, not a hard runtime dep."""
+    try:
+        import numpy as np
+    except ImportError:
+        return None, 0.0
+
+    def render(page) -> "np.ndarray":
+        pix = page.get_pixmap(dpi=VERIFY_DPI)
+        return np.frombuffer(pix.samples, dtype=np.uint8).reshape(
+            pix.height, pix.width, pix.n
+        ).astype(np.int16)
+
+    master = fitz.open(master_path)
+    worst = 0.0
+    ok = True
+    mp = 0
+    try:
+        for image_path in ordered:
+            src_file = case.intake_dir / image_path
+            if not src_file.exists():
+                continue
+            src = fitz.open(src_file)
+            for i in range(src.page_count):
+                if mp >= page_count:
+                    break
+                a, b = render(src[i]), render(master[mp])
+                diff = float(np.abs(a - b).mean()) if a.shape == b.shape else 1e9
+                worst = max(worst, diff)
+                if diff > VISUAL_TOLERANCE:
+                    ok = False
+                mp += 1
+            src.close()
+    finally:
+        master.close()
+    return ok, round(worst, 4)
+
+
 def assemble_case(
     case: Case, output_path: str | Path, *, verify: bool = True
 ) -> dict:
@@ -88,19 +140,25 @@ def assemble_case(
 
     Builds a Filing -> Image -> Document outline, carries embedded attachments,
     writes a ``<output>.manifest.json`` page-provenance sidecar, and (when
-    ``verify``) checks that every master page's text matches its source page.
-    Returns an integrity report.
+    ``verify``) proves the round-trip lost no context: every master page's text
+    matches its source (text-lossless), every page renders the same within
+    tolerance (visual-lossless, best-effort), and embedded attachments +
+    annotations are accounted for (carried/preserved, no silent loss). Returns
+    the integrity report.
     """
     output_path = Path(output_path)
+    ordered = _ordered_images(case)
     master = fitz.open()
     toc: list[list] = []
     pages: list[dict] = []
     src_text: list[str] = []
     missing: list[str] = []
-    embedded_total = 0
+    embedded_total = 0  # carried into the master
+    embedded_source = 0  # present in the sources
+    annots_source = 0  # annotations in the sources
     prev_filing: tuple[str, str] | None = None
 
-    for image_path in _ordered_images(case):
+    for image_path in ordered:
         src_file = case.intake_dir / image_path
         if not src_file.exists():
             missing.append(image_path)
@@ -124,6 +182,7 @@ def assemble_case(
         for i in range(src.page_count):
             text = src[i].get_text()
             src_text.append(text)
+            annots_source += sum(1 for _ in src[i].annots())
             pages.append(
                 {
                     "masterPage": start + i + 1,
@@ -133,23 +192,39 @@ def assemble_case(
                     "filingDate": date,
                 }
             )
+        try:
+            embedded_source += src.embfile_count()
+        except Exception:
+            pass
         embedded_total += _carry_embedded_files(master, src, name)
-        master.insert_pdf(src)
+        master.insert_pdf(src)  # annots=True by default → annotations carried
         src.close()
 
     master.set_toc(toc)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     master.save(output_path, garbage=4, deflate=True)
 
+    master_pages = master.page_count
     text_lossless: bool | None = None
+    annots_master = 0
     if verify:
         text_lossless = all(
             hashlib.sha256(master[i].get_text().encode()).hexdigest()
             == hashlib.sha256(src_text[i].encode()).hexdigest()
-            for i in range(master.page_count)
+            for i in range(master_pages)
         )
-    master_pages = master.page_count
+        annots_master = sum(sum(1 for _ in master[i].annots()) for i in range(master_pages))
     master.close()
+
+    # Visual fidelity (best-effort) + accounting that nothing was silently lost.
+    visual_lossless: bool | None = None
+    visual_worst_diff = 0.0
+    if verify:
+        visual_lossless, visual_worst_diff = _verify_visual(
+            case, ordered, output_path, master_pages
+        )
+    embedded_lossless = embedded_total == embedded_source
+    annots_lossless = (not verify) or annots_master == annots_source
 
     manifest = {
         "case": case.case_number,
@@ -158,9 +233,14 @@ def assemble_case(
         "pages": master_pages,
         "outline": [{"level": lvl, "title": t, "masterPage": pg} for lvl, t, pg in toc],
         "pageProvenance": pages,
+        "embeddedAttachmentsSource": embedded_source,
         "embeddedAttachmentsCarried": embedded_total,
+        "annotationsSource": annots_source,
+        "annotationsMaster": annots_master,
         "missingImages": missing,
         "textLossless": text_lossless,
+        "visualLossless": visual_lossless,
+        "visualWorstMeanDiff": visual_worst_diff,
     }
     manifest_path = output_path.with_suffix(".manifest.json")
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
@@ -172,7 +252,14 @@ def assemble_case(
         "images": manifest["images"],
         "pages": master_pages,
         "outline_entries": len(toc),
+        "embedded_source": embedded_source,
         "embedded_attachments": embedded_total,
+        "embedded_lossless": embedded_lossless,
+        "annotations_source": annots_source,
+        "annotations_master": annots_master,
+        "annotations_lossless": annots_lossless,
         "missing": missing,
         "text_lossless": text_lossless,
+        "visual_lossless": visual_lossless,
+        "visual_worst_diff": visual_worst_diff,
     }
