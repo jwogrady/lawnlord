@@ -1,144 +1,125 @@
 # Roadmap
 
-How lawnlord grows from a deterministic document exploder into a local-first case-understanding
-engine. Each item below is written to drop straight into a GitHub issue: an imperative title, the
-user-facing outcome, verifiable acceptance criteria, and a suggested label.
+How lawnlord grows from a deterministic document exploder into a local-first
+case-understanding engine — and, for the case it was built around, into the
+substrate for a specific litigation outcome.
 
-**Legend** — labels are the repo defaults: `enhancement` (new capability), `documentation`,
-`bug`. Milestones group issues.
+This roadmap is the documented state **before** a release — what's planned. Its mirror is the
+[CHANGELOG](../CHANGELOG.md), the documented state **after** a release — what shipped. The current
+state is always the commit; neither document describes the live present. When a milestone ships, its
+entries here graduate to the changelog, carrying the same issue and milestone links across the
+boundary.
 
----
-
-## Shipped — v0.1.0 (the exploder)
-
-The deterministic document exploder: one PDF (or a ZIP of court PDFs) → an
-`archive → submission → document → section → page` corpus with provenance, four-tier boundary
-detection, a curation overlay, and `--force` review preservation. See [`CHANGELOG.md`](../CHANGELOG.md).
-
-### Open release-hygiene items (issue-ready)
-
-#### Add an open-source LICENSE
-- **Outcome:** the repo and package declare a license so it can be released/distributed.
-- **Acceptance:** a `LICENSE` file exists; `pyproject.toml` declares the license; `uv build`
-  embeds it; README states the license.
-- **Label:** `documentation`
-
-#### Publish the v0.1.0 release
-- **Outcome:** v0.1.0 is tagged and released on GitHub.
-- **Acceptance:** release commit on `master`; `git tag v0.1.0` pushed; `gh release create v0.1.0`
-  with notes from the CHANGELOG; `uv build` artifacts attached or reproducible.
-- **Label:** `enhancement` *(outward-facing; do after LICENSE)*
+Every planned item links to its **GitHub issue** and its **release milestone** so this document and
+the tracker stay in sync. Issues: <https://github.com/jwogrady/lawnlord/issues> ·
+Milestones: <https://github.com/jwogrady/lawnlord/milestones>.
 
 ---
 
-## Next — Milestone 1 (v0.2.0): Case Workspace + Case/Event/Document Index
+## The end goal
 
-Turn lawnlord into a tool that ingests an **intake provider folder** (first provider: `ody` =
-Odyssey, `odyssey.mctx.org`), reads the authoritative case/docket/document metadata, explodes each
-document, and builds a DuckDB index of the full **case → event → document → section → page** model.
-Full design + schema: [`docs/plans/v0.2.0-milestone-1-case-workspace.md`](plans/v0.2.0-milestone-1-case-workspace.md).
-The curated intake JSON is the source of truth; the index never guesses what the metadata states.
-The example case lives in the separate **`gcp-hoa-case`** repo; lawnlord runs against its intake
-folder (`../gcp-hoa-case/intake/ody`) — case data never lives in the tool repo.
+> **Stop the foreclosure → know the real number → set aside the judgment → settle for actual dues only.**
 
-#### F1 — Case workspace + intake-folder resolution (decouple `paths.py`)
-- **Outcome:** lawnlord runs against an intake provider folder and a `--case-dir` output root, with
-  no `REPO_ROOT` dependency; a `Case` resolves the case from `intake/<provider>/`.
-- **Acceptance:** `Case.from_intake("../gcp-hoa-case/intake/ody")` yields caseNumber `25-09-14566`, 3 parties,
-  phase-ordered events, and 22 document refs; `grep -rn "REPO_ROOT" src/lawnlord/` is confined to
-  `paths.py`; existing tests pass unchanged.
-- **Label:** `enhancement`
+For HOA case `25-09-14566`: set aside the judgment and settle for only the actual annual dues
+owed — no legal fees, no administrative fees. Protecting the house from foreclosure is the first
+priority; "winning" means paying what is actually owed. The tool's job is **understanding** — it
+surfaces and *proposes*; the human decides. Legal conclusions are never machine-rendered.
 
-#### F2 — `lawnlord start` scaffold + intake contract
-- **Outcome:** `lawnlord start [dir]` materializes the `case/` skeleton (7 dirs + `manifests/case.json`
-  + an `lawnlord.duckdb`) and documents the intake-folder contract.
-- **Acceptance:** `lawnlord start /tmp/c` builds the documented tree; re-running is a
-  non-destructive no-op.
-- **Label:** `enhancement`
-
-#### F3 — Promote the CLI to subcommands
-- **Outcome:** `lawnlord start | build | index | query`; all existing exploder flags preserved
-  under `build` (alias `explode`); `build` accepts an intake folder or the legacy ZIP.
-- **Acceptance:** every existing flag works under `lawnlord build …`; `--help` lists the
-  subcommands; current behavior unchanged.
-- **Label:** `enhancement`
-
-#### F4 — DuckDB layer + Milestone-1 schema
-- **Outcome:** a `db` module opens `case/lawnlord.duckdb` and applies an idempotent, versioned
-  schema for `cases / parties / events / documents / document_events / sections / chunks`.
-- **Acceptance:** `apply_schema` run twice is a no-op; all M1 tables/columns exist; `duckdb`
-  added as a dependency with a cp313 wheel.
-- **Label:** `enhancement`
-
-#### F5 — Intake metadata ingestion (Odyssey adapter)
-- **Outcome:** parse the Odyssey JSON into `cases`, `parties`, `events`, `documents` (deduped by
-  file), and the `document_events` many-to-many join; titles/dates/types come from the JSON.
-- **Acceptance:** ingesting `../gcp-hoa-case/intake/ody` yields `cases`=1, `parties`=3, `documents`=22, events
-  populated, and many-to-many links correct (e.g. `Final_Summary_Judgment.pdf` under multiple
-  events); no PDF parsed in this step.
-- **Label:** `enhancement`
-
-#### F6 — Explode + index the corpus (sections, pages, cross-check)
-- **Outcome:** explode each `filings/*.pdf` into `case/extracted/corpus/`, index `sections` and
-  `chunks` (one row per page) from `manifest.json` + per-document `toc.json`, link each to its
-  document, and cross-check declared vs actual page counts.
-- **Acceptance:** `count(chunks)` == total exploded pages; every chunk row has `document_id` +
-  `source_page_number` + `citation_display`; re-index is byte-identical; page-count mismatches are
-  flagged (e.g. MSJ declared 121pp), not hidden; integrity guard fails on a dropped page.
-- **Label:** `enhancement`
-
-#### F7 — `lawnlord query`
-- **Outcome:** read-only search with provenance — `--text`, `--needs-review` (persisted review
-  flag, folds in OCR), and docket dimensions `--event` / `--phase` / `--party`.
-- **Acceptance:** `--text "summary judgment"` returns rows with document title + source page +
-  citation; `--needs-review` matches persisted flags; `--phase "Summary Judgment"` returns the
-  phase's documents; queries never write to disk.
-- **Label:** `enhancement`
-
-#### F8 — Milestone-1 tests
-- **Outcome:** hermetic tests covering intake parsing, workspace/scaffold, schema, ingestion +
-  indexing, and the page-count cross-check.
-- **Acceptance:** new `test_intake.py / test_workspace.py / test_db.py / test_index.py` pass; the
-  existing suite stays green; a real-data smoke over `intake/ody` is documented.
-- **Label:** `enhancement`
+The work is sequenced as a **prerequisite chain** that terminates in generating motions to file —
+not by jumping features ahead for urgency, but by building each layer on the one beneath it.
 
 ---
 
-## Later milestones (epics)
+## Governing principles
 
-#### M2 — Extraction depth
-OCR for image-only pages (`ocrLikelyNeeded`), paragraph chunking (fills the nullable `chunks` span
-columns), intake of un-docketed/knowledge files into `knowledgebase/*`, nested-ZIP expansion, and
-relocating immutable source PDFs into `artifacts/`. **Label:** `enhancement`
+These constrain every issue below. (Captured in design notes; see also `docs/context.md`.)
 
-#### M3 — Entity layer
-Decompose chunks into Facts/Events/Claims/Citations/**Deadlines** (e.g. parse the Docket Control
-Order) into an `entities` table keyed to `chunk` + `document`, AI-written with `needsReview: true`
-— never into human-owned legal fields or curated intake metadata. **Label:** `enhancement`
-
-#### M4 — Relationships / case graph
-A `relationships` table linking entities and documents (Claim→governed-by→Statute,
-Order→creates→Deadline, Response↔MSJ). **Label:** `enhancement`
-
-#### M5 — Reasoning
-Timelines (seeded by docket `events`), evidence maps, gap/contradiction analysis into
-`analysis_results`, each citing its provenance chain. **Label:** `enhancement`
-
-#### M6 — Drafting + review
-Filing generation into `outputs/`, grounded only in facts/evidence/law/procedure, with a review
-pass for citation/evidence support. **Label:** `enhancement`
-
-#### M7 — Agents + UX
-The conceptual agents (intake/extraction/entity/research/analysis/strategy/drafting/review) as
-orchestration, and a read-only dashboard over DuckDB answering the four UX questions. **Label:**
-`enhancement`
+1. **Mirror the court schema exactly.** Explode each source to the court-level schema as it lives in
+   the originating system. That mirrored record is the immutable **"what is" map**.
+2. **Everything else is additive.** No analysis, proposal, overlay, or verdict may ever mutate the
+   mirrored record or its generated provenance (hashes, page ranges, slugs, tier/confidence, paths,
+   citations). Enforced by the `ALLOWED_CURATED_FIELDS` whitelist (`curation.py`).
+3. **Two inputs, kept separate.**
+   - **Case decomposition** = the "what is" map, derived from the court's filed record. Evidence.
+   - **Knowledge Base** = curated context *the user supplies* — website links, JSON, PDFs that live
+     *outside* the case (court rules, statutes, CC&Rs, guidance). Authority/context, not evidence.
+   Analysis reasons over the case map *in the context of* the knowledge base.
+4. **The timeline is derived from what *is*.** Filing dates (the record) + court rules/statutes (the
+   knowledge base) → computed deadlines, each citing the rule that produced it. Never from
+   user-supplied dates.
+5. **Reconstructable text is the readiness gate.** When every page round-trips text + image from the
+   data and clears confidence against both intake sources, the case is `aiAccessible` — and only
+   then does legal analysis begin.
 
 ---
 
-## Open decisions (resolve before/with Milestone 1)
+## Shipped
 
-1. **M1 scope** — one PR for F1–F8, or split metadata ingestion (F5) into its own milestone?
-2. **Provider vs case naming** — provider folder (`ody`) selects the adapter; case slug =
-   `caseNumber`. If one provider holds multiple cases, is the layout `intake/<provider>/<case>/`?
-3. **Knowledge base** — all current documents are docketed case artifacts; `knowledge_documents`
-   stays structure-only until knowledge materials appear.
+| Version | What | Links |
+|---|---|---|
+| **0.3.0** | Complete-truth schema + bundle capstone — auto-OCR, BM25 search, lossless reassembly proof, field-complete mirror readers, canonical `case.json` v2.0, DuckDB standard schema, `lawnlord bundle`. | Milestone [v0.3.0 (#1)](https://github.com/jwogrady/lawnlord/milestone/1) · Tag [v0.3.0](https://github.com/jwogrady/lawnlord/releases/tag/v0.3.0) · Issues [#14](https://github.com/jwogrady/lawnlord/issues/14)–[#20](https://github.com/jwogrady/lawnlord/issues/20) |
+| **0.2.0** | Case workspace + Odyssey adapter, DuckDB index, `lawnlord query`, OCR, folder source. | Release [v0.2.0](https://github.com/jwogrady/lawnlord/releases/tag/v0.2.0) |
+| **0.1.0** | The deterministic exploder: `archive → submission → document → section → page` with provenance, 4-tier boundary detection, curation overlay, `--force` review preservation. | _Never tagged or released (see Release hygiene)_ |
+
+See [`CHANGELOG.md`](../CHANGELOG.md) for full detail.
+
+---
+
+## The path ahead — prerequisite chain
+
+Build top to bottom. Each milestone depends on the one above it.
+
+### v0.4.0 — Canonical "is" layer (the readiness gate)
+[Milestone #2](https://github.com/jwogrady/lawnlord/milestone/2) · *Mirror exactly, extract all text+meta, reconstruct from the data, prove confidence against both sources.*
+
+- [#34](https://github.com/jwogrady/lawnlord/issues/34) — Settle & implement the `section` level *(decision; gates #31)*
+- [#35](https://github.com/jwogrady/lawnlord/issues/35) — Resolve the `document` vocabulary collision: one glossary *(decision; gates #31)* · `documentation`
+- [#31](https://github.com/jwogrady/lawnlord/issues/31) — Content schema in DuckDB: per-page text + preserved-page-image pointer
+- [#32](https://github.com/jwogrady/lawnlord/issues/32) — Reconstruct `case-master.pdf` **from the data** + burned-in searchable text layer
+- [#33](https://github.com/jwogrady/lawnlord/issues/33) — Two-sided confidence: reconstruction vs Odyssey metadata **and** source PDFs → `aiAccessible`
+- [#36](https://github.com/jwogrady/lawnlord/issues/36) — Extract deadline/order dates from key documents as provenanced **facts**
+- [#30](https://github.com/jwogrady/lawnlord/issues/30) — Factual docket timeline derived from filing dates (what IS)
+- [#37](https://github.com/jwogrady/lawnlord/issues/37) — Enforce the additive-only invariant (test-proven)
+
+### v0.5.0 — Knowledge base + computed deadline timeline
+[Milestone #3](https://github.com/jwogrady/lawnlord/milestone/3) · *Curated external context the user supplies, plus the real clock derived from the record.*
+
+- [#41](https://github.com/jwogrady/lawnlord/issues/41) — Knowledge-base intake: curated external resources (links, JSON, PDFs) as context
+- [#42](https://github.com/jwogrady/lawnlord/issues/42) — Computed deadline timeline: filing dates + KB rules → deadlines (the real foreclosure clock)
+
+### v0.6.0 — Analysis layer: accept/decline + entities + relationships
+[Milestone #4](https://github.com/jwogrady/lawnlord/milestone/4) · *The "why" layer — machine-proposed, human-accepted; only `accepted` is truth.*
+
+- [#28](https://github.com/jwogrady/lawnlord/issues/28) — Strategic analysis as accept/decline proposals over an immutable record *(anchor)*
+- [#38](https://github.com/jwogrady/lawnlord/issues/38) — Epic: accept/decline mechanism + entity & relationship extraction
+
+### v0.7.0 — The ledger: dues vs fees, actual owed
+[Milestone #5](https://github.com/jwogrady/lawnlord/milestone/5) · *The number that decides the case.*
+
+- [#39](https://github.com/jwogrady/lawnlord/issues/39) — Epic: dues vs fees, claimed vs governing-document-authorized, actual-owed
+
+### v0.8.0 — Grounds to set aside + generate motions to file
+[Milestone #6](https://github.com/jwogrady/lawnlord/milestone/6) · *Terminal: the supportable case, drafted for human review.*
+
+- [#40](https://github.com/jwogrady/lawnlord/issues/40) — Epic: grounds to set aside (gap/contradiction reasoning)
+- [#43](https://github.com/jwogrady/lawnlord/issues/43) — Generate motions to file: set-aside motion + settlement basis, grounded
+
+---
+
+## Earlier vision epics (superseded framing)
+
+The original `M2–M7` epics (extraction depth, entity layer, relationships, reasoning, drafting,
+agents/UX) and the full vision live in [`docs/context.md`](context.md). The prerequisite chain above
+re-points that generic arc at the concrete end goal; treat the chain as authoritative for sequencing.
+
+---
+
+## Release hygiene (open)
+
+These are real, currently-open gaps — not yet issues:
+
+- **No `LICENSE` file.** The repo and package declare no license; needed before any outside
+  distribution. (`pyproject.toml` should declare it; README should state it.)
+- **v0.3.0 is tagged but has no published GitHub release.** The tag `v0.3.0` exists; a
+  `gh release create v0.3.0` with CHANGELOG notes is pending.
+- **v0.1.0 was never tagged or released.** Only `v0.2.0` and `v0.3.0` are tagged.

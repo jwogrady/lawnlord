@@ -5,7 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+This changelog is the documented state **after** each release — what shipped. Planned work (the
+state *before* a release) lives in the [ROADMAP](docs/ROADMAP.md); the current working state is
+always the commit. Each release below links to its **release milestone** and the **issues** it
+closed.
+
 ## [0.3.0] - 2026-06-17
+
+**Milestone:** [v0.3.0 (#1)](https://github.com/jwogrady/lawnlord/milestone/1) · **Tag:** [v0.3.0](https://github.com/jwogrady/lawnlord/releases/tag/v0.3.0) _(GitHub release pending)_ · **Issues:** [#14](https://github.com/jwogrady/lawnlord/issues/14) · [#15](https://github.com/jwogrady/lawnlord/issues/15) · [#16](https://github.com/jwogrady/lawnlord/issues/16) · [#17](https://github.com/jwogrady/lawnlord/issues/17) · [#18](https://github.com/jwogrady/lawnlord/issues/18) · [#19](https://github.com/jwogrady/lawnlord/issues/19) · [#20](https://github.com/jwogrady/lawnlord/issues/20)
 
 ### Added
 
@@ -60,6 +67,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.0] - 2026-06-16
 
+**Release:** [v0.2.0](https://github.com/jwogrady/lawnlord/releases/tag/v0.2.0) · **Milestone:** none _(pre-milestone)_ · **Issues:** _pre-issue-tracking_
+
 The case-understanding milestone: lawnlord now ingests a provider intake folder, indexes the whole
 `case → event → document → section → page` model into DuckDB, queries it with provenance, and
 optionally OCRs scanned pages.
@@ -100,7 +109,9 @@ optionally OCRs scanned pages.
 
 ## [0.1.0] - 2026-06-16
 
-First release: a standalone, deterministic legal court-record **exploder**.
+**Release:** not published · **Tag:** none · **Milestone:** none _(predates tagging)_
+
+The first version: a standalone, deterministic legal court-record **exploder**.
 
 ### Added
 
@@ -134,4 +145,5 @@ v0.1.0 is the exploder only. The broader "legal understanding engine" described 
 [`docs/`](docs/) — a case-workspace model, DuckDB index, entity/relationship graph, and
 analysis/strategy/drafting layers — is the **target vision and roadmap**, not yet implemented.
 
-[0.1.0]: https://github.com/jwogrady/lawnlord/releases/tag/v0.1.0
+[0.3.0]: https://github.com/jwogrady/lawnlord/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/jwogrady/lawnlord/releases/tag/v0.2.0
