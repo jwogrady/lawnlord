@@ -107,11 +107,20 @@ Build top to bottom. Each milestone depends on the one above it.
 
 ---
 
-## Earlier vision epics (superseded framing)
+## Long-range vision (beyond the chain)
 
-The original `M2–M7` epics (extraction depth, entity layer, relationships, reasoning, drafting,
-agents/UX) and the full architecture vision live in [`docs/architecture.md`](docs/architecture.md). The prerequisite chain above
-re-points that generic arc at the concrete end goal; treat the chain as authoritative for sequencing.
+The prerequisite chain above is authoritative for sequencing; the broader vision folds into those
+milestones but is recorded here so it isn't lost (aspirational design lives on the roadmap, not in
+the code summaries):
+
+- **Extraction depth** — paragraph chunking, knowledge-base files → v0.4.0 / v0.5.0.
+- **Entity layer** — Facts / Events / Claims / Citations / Deadlines, extracted with provenance → v0.6.0 ([#38](https://github.com/jwogrady/lawnlord/issues/38)).
+- **Relationships / case graph** — Claim→governed-by→Statute, Order→creates→Deadline → v0.6.0 ([#38](https://github.com/jwogrady/lawnlord/issues/38)).
+- **Reasoning** — timelines, evidence maps, gap/contradiction analysis → v0.5.0 ([#42](https://github.com/jwogrady/lawnlord/issues/42)), v0.8.0 ([#40](https://github.com/jwogrady/lawnlord/issues/40)).
+- **Drafting** — grounded motions and a settlement basis → v0.8.0 ([#43](https://github.com/jwogrady/lawnlord/issues/43)).
+- **Agents & a read-only view** — the conceptual agents (intake/extraction/entity/research/analysis/strategy/drafting/review) are *execution tools* that propose for human accept/decline — they never decide. Not yet built.
+
+What *is* built is summarized in [`docs/architecture.md`](docs/architecture.md).
 
 ---
 
