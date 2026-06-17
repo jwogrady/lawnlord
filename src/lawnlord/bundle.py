@@ -25,7 +25,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-from .assemble import assemble_case
+from .assemble import assemble_from_index
 from .boundaries import load_manual_boundaries
 from .canonical import to_canonical
 from .corpus import write_corpus
@@ -130,8 +130,10 @@ def bundle_case(case: Case, out_zip: str | Path, *, ocr=None) -> dict:
         wcase = Case.from_intake(case.intake_dir, case_dir=work)
         _build_index(wcase, ocr)
 
+        # The master is reconstructed from the indexed data (#32): preserved page
+        # images + a burned-in searchable layer for scanned pages.
         master_path = work / MASTER_PDF_NAME
-        astats = assemble_case(wcase, master_path)
+        astats = assemble_from_index(wcase, master_path)
         amanifest = json.loads(Path(astats["manifest"]).read_text(encoding="utf-8"))
 
         canonical = to_canonical(unify(wcase.model))
