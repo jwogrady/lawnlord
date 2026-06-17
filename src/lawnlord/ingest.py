@@ -21,6 +21,7 @@ import duckdb
 from slugify import slugify
 
 from .hashing import sha256_file
+from .unify import find_gaps, unify
 from .workspace import Case
 
 
@@ -53,6 +54,9 @@ def _clear_case(con: duckdb.DuckDBPyConnection, case_id: str) -> None:
     con.execute("DELETE FROM images WHERE case_id = ?", [case_id])
     con.execute("DELETE FROM events WHERE case_id = ?", [case_id])
     con.execute("DELETE FROM parties WHERE case_id = ?", [case_id])
+    con.execute("DELETE FROM financial_transactions WHERE case_id = ?", [case_id])
+    con.execute("DELETE FROM financials WHERE case_id = ?", [case_id])
+    con.execute("DELETE FROM case_gaps WHERE case_id = ?", [case_id])
     con.execute("DELETE FROM cases WHERE id = ?", [case_id])
 
 
@@ -63,44 +67,77 @@ def ingest_case(con: duckdb.DuckDBPyConnection, case: Case, generated_at: str) -
     reported in the returned ``skipped_images`` list rather than inserted
     with a fabricated hash.
     """
-    ident = case.identity
+    # Land the unified standard (ISO dates, the full identity facets) — not the
+    # raw parse. The model is the single source; unify is deterministic.
+    model = unify(case.model)
+    ident = model.identity
     case_id = ident.case_number or case.case_slug
     _clear_case(con, case_id)
 
     con.execute(
         """
-        INSERT INTO cases (id, title, court, judicial_officer, case_type, status,
-                           date_filed, disposition_type, disposition_date,
-                           source_url, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO cases (id, title, court, clerk, judicial_officer, case_type,
+                           case_category, status, date_filed, citation_number,
+                           disposition_type, disposition_date, disposition_comment,
+                           source_url, last_refreshed, source_note, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
-            case_id, ident.title, ident.court, ident.judicial_officer,
-            ident.case_type, ident.status, ident.date_filed,
-            ident.disposition_type, ident.disposition_date, ident.source_url,
-            generated_at,
+            case_id, ident.title, ident.court, ident.clerk,
+            ident.judicial_officer, ident.case_type, ident.case_category,
+            ident.status, ident.date_filed, ident.citation_number,
+            ident.disposition_type, ident.disposition_date,
+            ident.disposition_comment, ident.source_url, ident.last_refreshed,
+            model.source_note, generated_at,
         ],
     )
 
-    for i, party in enumerate(case.parties):
+    for i, party in enumerate(model.parties):
         con.execute(
             """
             INSERT INTO parties (id, case_id, role, name, representation,
-                                 attorneys, location)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                                 attorneys, aliases, location)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 f"{case_id}_party_{i:03d}", case_id, party.role, party.name,
                 party.representation,
                 json.dumps([a.__dict__ for a in party.attorneys]),
+                json.dumps(list(party.aliases)),
                 party.location,
             ],
+        )
+
+    if model.financials is not None:
+        fin = model.financials
+        con.execute(
+            """
+            INSERT INTO financials (case_id, party, total_assessment,
+                                    total_payments, balance_due, balance_as_of)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            [
+                case_id, fin.party, fin.total_assessment, fin.total_payments,
+                fin.balance_due, fin.balance_as_of,
+            ],
+        )
+        for i, t in enumerate(fin.transactions):
+            con.execute(
+                "INSERT INTO financial_transactions (case_id, idx, date, "
+                "description, amount) VALUES (?, ?, ?, ?, ?)",
+                [case_id, i, t.date, t.description, t.amount],
+            )
+
+    for field in find_gaps(model):
+        con.execute(
+            "INSERT INTO case_gaps (case_id, field) VALUES (?, ?)",
+            [case_id, field],
         )
 
     # Events: keep id -> files so image_events can be linked after images.
     used_event_ids: set[str] = set()
     event_files: list[tuple[str, tuple[str, ...]]] = []
-    for event in case.events:
+    for event in model.events:
         event_id = _event_id(case_id, event.date, event.event, used_event_ids)
         con.execute(
             """
@@ -119,7 +156,7 @@ def ingest_case(con: duckdb.DuckDBPyConnection, case: Case, generated_at: str) -
     path_to_image: dict[str, str] = {}
     seen_images: set[str] = set()
     skipped: list[str] = []
-    for doc in case.documents:
+    for doc in model.documents:
         pdf_path = case.intake_dir / doc.intake_path
         if not pdf_path.exists():
             skipped.append(doc.intake_path)
@@ -160,7 +197,7 @@ def ingest_case(con: duckdb.DuckDBPyConnection, case: Case, generated_at: str) -
 
     return {
         "cases": 1,
-        "parties": len(case.parties),
+        "parties": len(model.parties),
         "events": len(event_files),
         "images": len(seen_images),
         "image_events": len(used_links),
