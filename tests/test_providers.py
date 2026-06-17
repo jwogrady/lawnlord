@@ -63,6 +63,14 @@ def test_provider_selector_falls_back_to_odyssey(ody_intake):
     assert main.parse_provider("mystery", ody_intake) == main.parse_odyssey(ody_intake)
 
 
+def test_combo_provider_registered(ody_intake):
+    # `combo` (the reconciled best-of-both intake, the recommended source of
+    # truth) is Odyssey-shaped and registered explicitly, not just via fallback.
+    assert "combo" in main.PROVIDERS
+    assert main.PROVIDERS["combo"] is main.parse_odyssey
+    assert main.parse_provider("combo", ody_intake) == main.parse_odyssey(ody_intake)
+
+
 def test_missing_files_are_tolerated(tmp_path):
     empty = tmp_path / "ody"
     empty.mkdir()
