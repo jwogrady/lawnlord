@@ -94,7 +94,7 @@ def emit_compare(
                        e.event_type, e.date,
                        c.confidence, c.text_source,
                        (c.text IS NOT NULL AND length(trim(c.text)) > 0),
-                       d.title, d.document_family
+                       d.title, d.document_family, c.text
                 FROM chunks c
                 JOIN images i ON i.id = c.image_id
                 LEFT JOIN image_events ie ON ie.image_id = i.id
@@ -106,13 +106,12 @@ def emit_compare(
             ).fetchone()
             (intake_path, img_title, declared, actual, mismatch,
              ev_type, ev_date, conf, tsource, has_text,
-             doc_title, doc_family) = row or (
+             doc_title, doc_family, text) = row or (
                 None, filename, None, None, True,
-                None, None, None, None, False, None, None,
+                None, None, None, None, False, None, None, "",
             )
             stem = Path(filename).stem
             actual_name = f"{stem}-p{spn:03d}-actual.png"
-            recon_name = f"{stem}-p{spn:03d}-recon.png"
             if intake_path:
                 src = src_cache.get(filename)
                 if src is None:
@@ -120,7 +119,6 @@ def emit_compare(
                     src_cache[filename] = src
                 if 1 <= spn <= src.page_count:
                     _render(src[spn - 1], images_dir / actual_name, dpi)
-            _render(master[mpage - 1], images_dir / recon_name, dpi)
             declared_by[filename] = declared
             actual_by[filename] = actual
             rendered[filename].add(spn)
@@ -145,8 +143,15 @@ def emit_compare(
                         if doc_title
                         else None
                     ),
+                    # LEFT: the filed page (original). RIGHT: our textual
+                    # representation — the text in DuckDB and burned into the
+                    # reconstructed PDF. Comparing image-to-text is how a human
+                    # verifies the data is faithful to the filing.
                     "actual": f"/images/{actual_name}",
-                    "reconstructed": f"/images/{recon_name}",
+                    "text": text or "",
+                    "textSource": tsource or ("none" if not has_text else "pdf"),
+                    # the assembled reconstruction (text + any assets), lossless
+                    "masterPage": mpage,
                     "score": round(conf if conf is not None else 0.0, 3),
                     "note": _note(bool(mismatch), bool(has_text), tsource),
                 }
@@ -160,7 +165,12 @@ def emit_compare(
     integrity = _reconcile(rendered, declared_by, actual_by, len(pages))
     (out_dir / "compare.json").write_text(
         json.dumps(
-            {"case": case.case_number, "integrity": integrity, "pages": pages},
+            {
+                "case": case.case_number,
+                "masterPdf": master_path.name,
+                "integrity": integrity,
+                "pages": pages,
+            },
             indent=2,
         ),
         encoding="utf-8",

@@ -42,9 +42,10 @@ def test_emit_compare_renders_pages_scores_and_json(tmp_path):
     data = json.loads((out / "compare.json").read_text())
     assert data["case"] == "55-00-8" and len(data["pages"]) == 2
     for p in data["pages"]:
-        # both renders exist on disk where the JSON points (minus the leading /)
+        # the filed page is rendered to an image; the right side is our text
         assert (out / p["actual"].lstrip("/")).exists()
-        assert (out / p["reconstructed"].lstrip("/")).exists()
+        assert "Petition page" in p["text"]  # our textual representation
+        assert p["masterPage"] >= 1  # links to the assembled reconstruction PDF
         assert 0.0 <= p["score"] <= 1.0
         assert p["note"]
         # the court's structure: case -> filing (submission event) -> image

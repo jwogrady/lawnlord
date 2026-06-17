@@ -252,6 +252,30 @@ body {
 	border-radius: 8px;
 	image-rendering: -webkit-optimize-contrast;
 }
+.compare figcaption a {
+	color: var(--gold);
+}
+/* right pane: our textual representation, on paper to mirror the filed page */
+.compare .textfig {
+	display: flex;
+	flex-direction: column;
+}
+.textpane {
+	height: 74vh;
+	overflow: auto;
+	background: var(--cream);
+	color: #1a1a12;
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	padding: 18px 22px;
+	white-space: pre-wrap;
+	word-break: break-word;
+	font: 14px / 1.6 var(--font-sans);
+}
+.textpane .empty {
+	color: #6b6f58;
+	font-style: italic;
+}
 
 /* the review form (compare → rate → note → flag → reviewed) */
 .review {
