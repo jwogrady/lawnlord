@@ -86,14 +86,19 @@ def emit_compare(
                 """
                 SELECT i.intake_path, COALESCE(i.page_count_mismatch, TRUE),
                        c.confidence, c.text_source,
-                       (c.text IS NOT NULL AND length(trim(c.text)) > 0)
-                FROM chunks c JOIN images i ON i.id = c.image_id
+                       (c.text IS NOT NULL AND length(trim(c.text)) > 0),
+                       d.id, d.title, d.document_family,
+                       d.source_page_start, d.source_page_end
+                FROM chunks c
+                JOIN images i ON i.id = c.image_id
+                LEFT JOIN documents d ON d.id = c.document_id
                 WHERE i.filename = ? AND c.source_page_number = ? LIMIT 1
                 """,
                 [filename, spn],
             ).fetchone()
-            intake_path, mismatch, conf, tsource, has_text = row or (
-                None, True, None, None, False,
+            (intake_path, mismatch, conf, tsource, has_text,
+             doc_id, doc_title, doc_family, dstart, dend) = row or (
+                None, True, None, None, False, None, None, None, None, None,
             )
             stem = Path(filename).stem
             actual_name = f"{stem}-p{spn:03d}-actual.png"
@@ -111,6 +116,15 @@ def emit_compare(
                     "id": f"{stem}_p{spn}",
                     "image": filename,
                     "page": spn,
+                    # the additive document/exhibit this page belongs to (#69),
+                    # so the reviewer compares at the litigation unit, not flat pages
+                    "document": {
+                        "id": doc_id or stem,
+                        "title": doc_title or filename,
+                        "family": doc_family or "",
+                        "pageStart": dstart,
+                        "pageEnd": dend,
+                    },
                     "actual": f"/images/{actual_name}",
                     "reconstructed": f"/images/{recon_name}",
                     "score": round(conf if conf is not None else 0.0, 3),
