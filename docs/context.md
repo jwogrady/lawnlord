@@ -3,7 +3,7 @@
 > **Status — background vision.** This captures lawnlord's *prime directive and core concepts*. It
 > is not the authoritative plan or status. Through **v0.3.0** the case-record foundation has shipped
 > (exploder, DuckDB index, OCR, full-text search, lossless bundle). For what's shipped see
-> [CHANGELOG](../CHANGELOG.md); for what's planned see [ROADMAP](ROADMAP.md) (the plan itself is the
+> [CHANGELOG](../CHANGELOG.md); for what's planned see [ROADMAP](../ROADMAP.md) (the plan itself is the
 > GitHub issues assigned to each milestone). The commit is always the present.
 
 ## Overview

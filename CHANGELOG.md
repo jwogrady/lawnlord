@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 This changelog is the documented state **after** each release — what shipped. Planned work (the
-state *before* a release) lives in the [ROADMAP](docs/ROADMAP.md); the current working state is
+state *before* a release) lives in the [ROADMAP](ROADMAP.md); the current working state is
 always the commit. Each release below links to its **release milestone** and the **issues** it
 closed.
 
@@ -38,7 +38,7 @@ closed.
   (Motion + Exhibits A–D + Affidavit), each a contiguous page range, junk bookmarks excluded. The
   exploder's on-disk corpus keeps its "section" vocabulary; it is mapped to `documents` at the index
   boundary. `SCHEMA_VERSION` → 2 (per-case DBs are regenerable; no migration). Design:
-  `docs/plans/v0.3.0-complete-truth-and-full-text.md`.
+  [v0.3.0 milestone (#1)](https://github.com/jwogrady/lawnlord/milestone/1).
 
 - **`lawnlord assemble` — the lossless explode ↔ reassemble proof.** Reassemble a case's images
   back into one master PDF from the **preserved original images** (immutable, hash-pinned), in
@@ -47,7 +47,7 @@ closed.
   page→provenance sidecar and verifies page-for-page text fidelity, so "no context lost" is a
   checked invariant, not a claim. Against the real `combo` case: 22 images → one 255-page master,
   text-lossless, 61-entry outline, every page traceable to (image, source page). Design:
-  `docs/plans/v0.3.0-complete-truth-and-full-text.md`.
+  [v0.3.0 milestone (#1)](https://github.com/jwogrady/lawnlord/milestone/1).
 
 - **Canonical case standard (`case.json`) + `lawnlord pack`.** Define the portable, versioned
   representation a provider adapter populates: `to_canonical(model)` / `from_canonical(dict)`
@@ -98,7 +98,7 @@ optionally OCRs scanned pages.
 
 ### Changed
 
-- Project framing: added `docs/ROADMAP.md` and `docs/plans/`; refreshed `pyproject.toml` metadata
+- Project framing: added project planning docs (roadmap + milestone plans); refreshed `pyproject.toml` metadata
   (description, keywords, trove classifiers, URLs); `.gitignore` ignores `intake/` (case data never
   lives in the tool repo).
 

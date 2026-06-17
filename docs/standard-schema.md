@@ -135,4 +135,4 @@ normalized — mirror-unification, not conflict-reconciliation. The decisions st
 image line — whether `section` returns as a first-class level, and the single `document` glossary —
 are tracked in [#34](https://github.com/jwogrady/lawnlord/issues/34) /
 [#35](https://github.com/jwogrady/lawnlord/issues/35) (v0.4.0). See [CHANGELOG](../CHANGELOG.md) for
-what shipped and [ROADMAP](ROADMAP.md) for what's next.
+what shipped and [ROADMAP](../ROADMAP.md) for what's next.

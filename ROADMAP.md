@@ -5,7 +5,7 @@ case-understanding engine — and, for the case it was built around, into the
 substrate for a specific litigation outcome.
 
 This roadmap is the documented state **before** a release — what's planned. Its mirror is the
-[CHANGELOG](../CHANGELOG.md), the documented state **after** a release — what shipped. The current
+[CHANGELOG](CHANGELOG.md), the documented state **after** a release — what shipped. The current
 state is always the commit; neither document describes the live present. When a milestone ships, its
 entries here graduate to the changelog, carrying the same issue and milestone links across the
 boundary.
@@ -62,7 +62,7 @@ These constrain every issue below. (Captured in design notes; see also `docs/con
 | **0.2.0** | Case workspace + Odyssey adapter, DuckDB index, `lawnlord query`, OCR, folder source. | Release [v0.2.0](https://github.com/jwogrady/lawnlord/releases/tag/v0.2.0) |
 | **0.1.0** | The deterministic exploder: `archive → submission → document → section → page` with provenance, 4-tier boundary detection, curation overlay, `--force` review preservation. | _Never tagged or released (see Release hygiene)_ |
 
-See [`CHANGELOG.md`](../CHANGELOG.md) for full detail.
+See [`CHANGELOG.md`](CHANGELOG.md) for full detail.
 
 ---
 
@@ -110,7 +110,7 @@ Build top to bottom. Each milestone depends on the one above it.
 ## Earlier vision epics (superseded framing)
 
 The original `M2–M7` epics (extraction depth, entity layer, relationships, reasoning, drafting,
-agents/UX) and the full vision live in [`docs/context.md`](context.md). The prerequisite chain above
+agents/UX) and the full vision live in [`docs/context.md`](docs/context.md). The prerequisite chain above
 re-points that generic arc at the concrete end goal; treat the chain as authoritative for sequencing.
 
 ---

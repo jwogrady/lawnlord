@@ -4,7 +4,7 @@
 > commands and get structured artifacts (the bundle, `case.json`, the DuckDB index, motion drafts).
 > There is no interactive dashboard, and none is on the v0.4–v0.8 roadmap. This doc captures the
 > *experience principles* that keep the tool honest — not screens. For usage and results see the
-> [README](../README.md); for the plan see [ROADMAP](ROADMAP.md) (the GitHub issues per milestone);
+> [README](../README.md); for the plan see [ROADMAP](../ROADMAP.md) (the GitHub issues per milestone);
 > for what shipped see [CHANGELOG](../CHANGELOG.md).
 
 ## What the tool is for

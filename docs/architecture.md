@@ -6,7 +6,7 @@
 > The entity graph, relationships, and analysis/strategy/drafting layers below are **additive**
 > future work, sequenced in the prerequisite chain. For what's shipped see
 > [CHANGELOG](../CHANGELOG.md); for what's planned — and the GitHub issues that *are* the plan — see
-> [ROADMAP](ROADMAP.md). The commit is always the present.
+> [ROADMAP](../ROADMAP.md). The commit is always the present.
 
 ## Overview
 

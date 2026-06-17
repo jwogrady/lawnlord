@@ -10,7 +10,7 @@ downstream conclusion traces back to a real source page.
 
 > **Status:** installable CLI, shipped through **v0.3.0**. What's shipped:
 > [CHANGELOG.md](CHANGELOG.md) (where we've been). What's next:
-> [docs/ROADMAP.md](docs/ROADMAP.md) (where we're going).
+> [ROADMAP.md](ROADMAP.md) (where we're going).
 
 ## What it produces
 
@@ -91,9 +91,18 @@ uv run pytest                        # characterization + end-to-end suite (155 
 The tests are **characterization tests**: they pin current behavior, so a failing test is a
 behavior change to approve by hand, not to silently update.
 
+## Documentation
+
+Background and reference (each linked here, the canonical entry point):
+
+- [`docs/standard-schema.md`](docs/standard-schema.md) — the standard court-record schema (the mirrored "what is", down to the image).
+- [`docs/context.md`](docs/context.md) — prime directive and core concepts (background vision).
+- [`docs/architecture.md`](docs/architecture.md) — target architecture (background vision).
+- [`docs/ux.md`](docs/ux.md) — product north star (experience principles).
+
 ## Roadmap & history
 
-- **Where we're going:** [docs/ROADMAP.md](docs/ROADMAP.md). The plan itself is the
+- **Where we're going:** [ROADMAP.md](ROADMAP.md). The plan itself is the
   [GitHub issues](https://github.com/jwogrady/lawnlord/issues) assigned to each milestone; the
   roadmap narrates them.
 - **Where we've been:** [CHANGELOG.md](CHANGELOG.md).
