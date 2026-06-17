@@ -1,6 +1,6 @@
 [project]
 name = "lawnlord"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local-first toolkit for legal court records: explode each case document into citation-preserving sections and pages with full provenance — the deterministic substrate for a case-understanding engine."
 readme = "README.md"
 requires-python = ">=3.13"

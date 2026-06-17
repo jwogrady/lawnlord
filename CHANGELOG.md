@@ -7,20 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Documentation and project framing toward v0.2.0. Planned work — the case-workspace model, Odyssey
-intake, and the DuckDB `case → event → document → section → page` index — is tracked in
-[`docs/ROADMAP.md`](docs/ROADMAP.md).
+## [0.2.0] - 2026-06-16
+
+The case-understanding milestone: lawnlord now ingests a provider intake folder, indexes the whole
+`case → event → document → section → page` model into DuckDB, queries it with provenance, and
+optionally OCRs scanned pages.
 
 ### Added
 
-- `docs/ROADMAP.md` — phased, issue-ready roadmap (v0.1.0 → Milestone 1 → later epics).
-- `docs/plans/` — the v0.1.0 release record and the Milestone 1 design (case workspace + Odyssey
-  intake + DuckDB index).
+- **Case workspace + Odyssey adapter** — `Case.from_intake()` resolves a case from a provider
+  folder (`intake/<provider>/`); the `odyssey` adapter parses the case-summary / case-history /
+  register-of-actions / filings JSON into typed identity, parties, phase-ordered events, and
+  documents. No `REPO_ROOT` coupling.
+- **DuckDB index** (`db.py`) — idempotent, versioned schema for
+  `cases / parties / events / documents / document_events / sections / chunks`.
+- **Docket ingest** (`ingest.py`) — `ingest_case()` loads the curated docket metadata; documents
+  keyed by content hash (`doc_<sha16>`, matching the exploder).
+- **Folder source** — explode a directory of loose `filings/*.pdf` directly, not only a ZIP
+  (`inspect_folder` / `inspect_source`); the ZIP path is unchanged.
+- **Corpus index** (`index.py`) — index sections + page chunks from the manifest and per-document
+  `toc.json`, with a declared-vs-actual page-count cross-check, an atomic (transactional) re-index,
+  and an integrity guard on gapless page coverage.
+- **`lawnlord query`** — read-only search with provenance: `--text`, `--needs-review`, `--phase`,
+  `--event`, `--party`.
+- **OCR** (`ocr.py`) — optional `--ocr` / `--gpu` recovers text for scanned pages (RapidOCR; CUDA
+  when available, graceful CPU fallback); each page tags `textSource` and `ocrConfidence`. OCR
+  text is machine-generated and non-evidential.
+- **CLI** — `lawnlord index` ties explode → ingest → index together; `build` gains a folder source
+  and `--ocr` / `--gpu`.
 
 ### Changed
 
-- `pyproject.toml` metadata: refreshed description, added keywords, trove classifiers, and project
-  URLs.
+- Project framing: added `docs/ROADMAP.md` and `docs/plans/`; refreshed `pyproject.toml` metadata
+  (description, keywords, trove classifiers, URLs); `.gitignore` ignores `intake/` (case data never
+  lives in the tool repo).
+
+### Notes
+
+- Determinism preserved: re-index is byte-identical and row timestamps come from the corpus
+  `generatedAt`. Page-analysis legal fields stay human-owned and are never pre-filled.
 
 ## [0.1.0] - 2026-06-16
 
