@@ -65,6 +65,7 @@ from .curation import (
 )
 from .db import SCHEMA_VERSION, apply_schema, open_case_db
 from .hashing import now_iso, sha256_bytes, sha256_file
+from .index import index_corpus
 from .ingest import ingest_case
 from .intake import (
     CONFIG_FILENAME,
