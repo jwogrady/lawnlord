@@ -24,6 +24,7 @@ from pathlib import Path
 
 import duckdb
 
+from .hashing import sha256_file
 from .workspace import Case
 
 
@@ -187,23 +188,41 @@ def _index_documents(
                         else ""
                     )
                     citation_low = citation_display = ""
+                    text_source = None
+                    ocr_confidence = None
                     analysis_path = doc_dir / page["analysisPath"]
                     if analysis_path.exists():
-                        citation = _load(analysis_path).get("citation", {}) or {}
+                        analysis = _load(analysis_path)
+                        citation = analysis.get("citation", {}) or {}
                         citation_low = citation.get("lowLevel", "")
                         citation_display = citation.get("display", "")
+                        text_source = analysis.get("textSource")
+                        ocr_confidence = analysis.get("ocrConfidence")
+                    # Pointer to the preserved page image (the per-page PDF), so a
+                    # page is reconstructable from the data alone (#31). Path is
+                    # corpus-relative; the sha256 pins the bytes on disk.
+                    page_pdf = doc_dir / page["pdfPath"]
+                    page_image_path = (
+                        str(page_pdf.relative_to(corpus_dir)) if page_pdf.exists() else None
+                    )
+                    page_image_sha256 = sha256_file(page_pdf) if page_pdf.exists() else None
                     con.execute(
                         """
                         INSERT INTO chunks (id, case_id, image_id, document_id,
                             text, page_number, source_page_number, paragraph_number,
                             text_span_start, text_span_end, extraction_method,
-                            citation_low, citation_display, confidence, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, NULL, ?)
+                            citation_low, citation_display, confidence,
+                            text_source, ocr_confidence, page_image_path,
+                            page_image_sha256, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, NULL,
+                            ?, ?, ?, ?, ?)
                         """,
                         [
                             f"{document_id}_p{spn}", case_id, image_id, document_id,
                             text, page.get("pageNumber"), spn, "pdf_text",
-                            citation_low, citation_display, generated_at,
+                            citation_low, citation_display,
+                            text_source, ocr_confidence, page_image_path,
+                            page_image_sha256, generated_at,
                         ],
                     )
                     chunks_n += 1

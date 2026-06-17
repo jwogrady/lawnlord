@@ -173,3 +173,22 @@ def test_index_cli_end_to_end(tmp_path):
     con = main.open_case_db(out / "lawnlord.duckdb")
     assert con.execute("SELECT count(*) FROM chunks").fetchone()[0] == 3
     assert con.execute("SELECT count(*) FROM images").fetchone()[0] == 2
+
+
+def test_content_schema_page_pointer(tmp_path):
+    # Every page chunk carries its text provenance and a pointer to its
+    # preserved page image: a corpus-relative path that resolves, and a sha256
+    # that matches the bytes on disk (#31).
+    from lawnlord.hashing import sha256_file
+
+    case, con, stats = _index(tmp_path)
+    rows = con.execute(
+        "SELECT page_image_path, page_image_sha256, text_source FROM chunks"
+    ).fetchall()
+    assert rows and len(rows) == stats["chunks"]
+    for path, sha, source in rows:
+        assert path and sha  # no nulls — a page is reconstructable from the data
+        resolved = case.corpus_dir / path
+        assert resolved.exists()  # the pointer resolves to a preserved page image
+        assert sha256_file(resolved) == sha  # and the sha256 pins those bytes
+        assert source == "native"  # synthetic PDFs carry a real text layer

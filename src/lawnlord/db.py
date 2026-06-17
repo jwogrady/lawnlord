@@ -25,7 +25,11 @@ import duckdb
 # v3: landed the standard schema — case identity facets, financials +
 #     financial_transactions, party aliases, and case_gaps.
 # Per-case DBs are regenerable, so the bump needs no in-place migration.
-SCHEMA_VERSION = 3
+# v4: chunks carry the page's text provenance (text_source, ocr_confidence) and
+# a pointer to its preserved page image (page_image_path + page_image_sha256),
+# so a page is reconstructable from the data alone (#31). Per-case DBs are
+# regenerable, so the bump needs no in-place migration.
+SCHEMA_VERSION = 4
 
 # One statement per table; CREATE ... IF NOT EXISTS keeps apply_schema idempotent.
 _SCHEMA_STATEMENTS = (
@@ -160,6 +164,10 @@ _SCHEMA_STATEMENTS = (
         citation_low TEXT,
         citation_display TEXT,
         confidence DOUBLE,
+        text_source TEXT,
+        ocr_confidence DOUBLE,
+        page_image_path TEXT,
+        page_image_sha256 TEXT,
         created_at TEXT
     )
     """,
