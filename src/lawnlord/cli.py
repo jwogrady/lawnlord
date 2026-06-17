@@ -17,7 +17,7 @@ from pathlib import Path
 
 from rich.table import Table
 
-from .archive import inspect_archive
+from .archive import inspect_source
 from .boundaries import load_manual_boundaries
 from .console import console
 from .corpus import write_corpus
@@ -39,8 +39,19 @@ def _add_packet(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--packet",
         default=None,
-        help="Explicit source ZIP (default: the single *.zip in the intake dir)",
+        help=(
+            "Explicit source: a ZIP, or a directory of loose PDFs "
+            "(default: the single *.zip in the intake dir)"
+        ),
     )
+
+
+def _resolve_source(intake, explicit) -> Path:
+    """Resolve the source to explode: an explicit directory of PDFs is used
+    as-is (folder mode); otherwise fall back to ZIP packet resolution."""
+    if explicit and Path(explicit).is_dir():
+        return Path(explicit).resolve()
+    return resolve_packet(intake, explicit)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -106,13 +117,13 @@ def main(argv: list[str] | None = None) -> None:
     intake = load_intake(args.root)
 
     if args.command == "report":
-        packet = resolve_packet(intake, args.packet)
+        packet = _resolve_source(intake, args.packet)
         manual = load_manual_boundaries(intake.manual_boundaries_path)
-        report_archive(inspect_archive(packet, manual))
+        report_archive(inspect_source(packet, manual))
         return
 
     if args.command == "emit-boundaries":
-        packet = resolve_packet(intake, args.packet)
+        packet = _resolve_source(intake, args.packet)
         output_path = intake.generated_boundaries_path
         if output_path.exists():
             console.print(
@@ -121,7 +132,7 @@ def main(argv: list[str] | None = None) -> None:
         # A draft of the *automatic* detector output for human review — never
         # the live manual baseline, which would make the draft circular once
         # the manual boundaries file exists.
-        template = write_boundary_template(inspect_archive(packet, {}), output_path)
+        template = write_boundary_template(inspect_source(packet, {}), output_path)
         documents = template["documents"]
         section_total = sum(d["detectedSectionCount"] for d in documents.values())
         review_total = sum(
@@ -139,7 +150,7 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     if args.command == "build":
-        packet = resolve_packet(intake, args.packet)
+        packet = _resolve_source(intake, args.packet)
         console.print(f"[bold]Packet:[/] {packet}")
         manual_boundaries = load_manual_boundaries(intake.manual_boundaries_path)
         curation = load_curation(intake.curation_path)

@@ -9,6 +9,7 @@ re-anchored to the corpus root in the manifest.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import shutil
 import zipfile
@@ -18,7 +19,7 @@ import fitz
 from slugify import slugify
 
 from .analysis_schema import legal_analysis_placeholders, write_json
-from .archive import inspect_archive
+from .archive import inspect_source
 from .boundaries import (
     REVIEW_CONFIDENCE_THRESHOLD,
     SectionBoundary,
@@ -395,7 +396,7 @@ def write_corpus(
     curated_documents_applied = 0
     curated_sections_applied = 0
 
-    report = inspect_archive(zip_path, manual_boundaries)
+    report = inspect_source(zip_path, manual_boundaries)
 
     archive_slug = slugify(zip_path.stem) or "archive"
     archive_id = f"arch_{report['zipSha256'][:16]}"
@@ -457,7 +458,14 @@ def write_corpus(
         for name in report["nestedZips"]:
             console.print(f"  - {name}")
 
-    with zipfile.ZipFile(zip_path) as z:
+    # ZIP mode reads bytes from the archive; folder mode reads each PDF from
+    # disk (entry.source_path) and needs no open archive handle.
+    zip_ctx = (
+        zipfile.ZipFile(zip_path)
+        if zipfile.is_zipfile(zip_path)
+        else contextlib.nullcontext()
+    )
+    with zip_ctx as z:
         for entry in report["pdfEntries"]:
             if entry.page_count is None or entry.sha256 is None:
                 console.print(
@@ -491,8 +499,12 @@ def write_corpus(
             document_dir.mkdir(parents=True, exist_ok=True)
 
             # Copy by reading entry bytes and writing to a slug-derived path —
-            # never extract using the zip entry's own name.
-            source_bytes = z.read(entry.zip_path)
+            # never extract using the entry's own name. Folder-mode entries
+            # carry an on-disk source_path; ZIP-mode entries read from the zip.
+            if entry.source_path:
+                source_bytes = Path(entry.source_path).read_bytes()
+            else:
+                source_bytes = z.read(entry.zip_path)
             (document_dir / "source.pdf").write_bytes(source_bytes)
 
             submission_id = f"sub_{entry.sha256[:16]}"
