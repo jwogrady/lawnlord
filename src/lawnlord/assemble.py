@@ -29,6 +29,12 @@ import fitz  # pymupdf
 from .db import open_case_db
 from .workspace import Case
 
+# Merging tagged (accessible) PDFs makes MuPDF print benign warnings to stderr
+# ("No common ancestor in structure tree") — it can't reconcile the source
+# structure trees, but page content is unaffected. Silence that noise; real
+# errors still raise.
+fitz.TOOLS.mupdf_display_errors(False)
+
 # Visual-fidelity check: render pages at this DPI and require the mean absolute
 # per-channel pixel difference between each source page and its master page to
 # stay under the tolerance. insert_pdf is not bit-identical (it rewrites the
