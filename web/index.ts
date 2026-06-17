@@ -61,6 +61,9 @@ const server = Bun.serve({
 		if (url.pathname === "/lawnlord.png") {
 			return new Response(Bun.file(join(import.meta.dir, "lawnlord.png")));
 		}
+		if (url.pathname === "/favicon.ico") {
+			return new Response(Bun.file(join(import.meta.dir, "favicon.ico")));
+		}
 		if (url.pathname.startsWith("/images/")) {
 			const file = Bun.file(join(COMPARE_DIR, url.pathname));
 			if (await file.exists()) return new Response(file);
