@@ -253,6 +253,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Entry point. Report known input errors cleanly (a clear message and exit
+    1, no traceback); let unexpected errors surface for debugging."""
+    try:
+        _main(argv)
+    except (FileNotFoundError, ValueError) as exc:
+        console.print(f"[red]Error:[/] {exc}")
+        raise SystemExit(1) from None
+
+
+def _main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
 
     if args.command == "query":

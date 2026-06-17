@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 import lawnlord as main
 
 
@@ -40,3 +42,12 @@ def test_output_paths_under_case_dir(ody_intake, tmp_path):
 def test_case_dir_defaults_to_cwd(ody_intake):
     case = main.Case.from_intake(ody_intake)
     assert case.case_dir == Path.cwd()
+
+
+def test_from_intake_rejects_non_provider_folder(tmp_path):
+    # A folder without case JSON or a filings/ dir (e.g. a packet workspace) is
+    # not a provider intake — fail clearly, not with a cryptic zip error.
+    bare = tmp_path / "not-a-provider"
+    bare.mkdir()
+    with pytest.raises(FileNotFoundError, match="not a provider intake folder"):
+        main.Case.from_intake(bare)
