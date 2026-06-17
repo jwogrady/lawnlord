@@ -102,5 +102,12 @@ from .providers import (
     parse_odyssey,
     parse_provider,
 )
+from .query import (
+    documents_by_event,
+    documents_by_party,
+    documents_by_phase,
+    needs_review_sections,
+    search_text,
+)
 from .reporting import report_archive, write_boundary_template
 from .workspace import OUTPUT_SUBDIRS, Case
