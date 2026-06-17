@@ -5,6 +5,7 @@ import lawnlord as main
 _M1_TABLES = {
     "schema_meta", "cases", "parties", "events", "images",
     "image_events", "documents", "chunks", "knowledge_documents",
+    "financials", "financial_transactions", "case_gaps",
 }
 
 
