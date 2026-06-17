@@ -33,7 +33,7 @@ not by jumping features ahead for urgency, but by building each layer on the one
 
 ## Governing principles
 
-These constrain every issue below. (See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the engineering invariants.)
+These constrain every issue below. (See [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) for the engineering invariants.)
 
 1. **Mirror the court schema exactly.** Explode each source to the court-level schema as it lives in
    the originating system. That mirrored record is the immutable **"what is" map**.
