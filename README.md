@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/assets/lawnlord.png" alt="LAWN LORD" width="380" /></p>
+
 # lawnlord
 
 *Ingest a case's filings and sort them into the schema you need to analyze the case — and fight it. Verifiable, and traceable to the source.*
