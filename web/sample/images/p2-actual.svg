@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="850" height="1100" viewBox="0 0 850 1100">
+  <rect width="850" height="1100" fill="#fbfbf7"/>
+  <text x="60" y="90" font-family="Courier, monospace" font-size="20" fill="#111">EXHIBIT A — ASSESSMENT LEDGER</text>
+  <text x="60" y="150" font-family="Courier, monospace" font-size="16" fill="#222">2023 Annual Dues .......... $  450.00</text>
+  <text x="60" y="185" font-family="Courier, monospace" font-size="16" fill="#222">Late Fee .................. $  125.00</text>
+  <text x="60" y="220" font-family="Courier, monospace" font-size="16" fill="#222">Attorney Fees ............. $2,400.00</text>
+  <text x="60" y="255" font-family="Courier, monospace" font-size="16" fill="#222">Balance Due ............... $2,975.00</text>
+</svg>

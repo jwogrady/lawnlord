@@ -1,0 +1,23 @@
+{
+	"case": "25-09-14566 (sample)",
+	"pages": [
+		{
+			"id": "petition_p1",
+			"image": "Petition.pdf",
+			"page": 1,
+			"actual": "/images/p1-actual.svg",
+			"reconstructed": "/images/p1-recon.svg",
+			"score": 0.92,
+			"note": "Native text layer; declared page count matches actual. High confidence."
+		},
+		{
+			"id": "petition_p2",
+			"image": "Petition.pdf",
+			"page": 2,
+			"actual": "/images/p2-actual.svg",
+			"reconstructed": "/images/p2-recon.svg",
+			"score": 0.5,
+			"note": "Scanned page; text recovered via OCR — one line is uncertain. Verify."
+		}
+	]
+}

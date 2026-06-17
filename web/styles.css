@@ -1,0 +1,179 @@
+:root {
+	--bg: #0f1115;
+	--panel: #171a21;
+	--line: #2a2f3a;
+	--ink: #e7e9ee;
+	--muted: #9aa3b2;
+	--accent: #5b9dff;
+	--good: #3fb950;
+	--bad: #f85149;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+html,
+body {
+	margin: 0;
+	height: 100%;
+	background: var(--bg);
+	color: var(--ink);
+	font:
+		15px / 1.45 ui-sans-serif,
+		system-ui,
+		-apple-system,
+		Segoe UI,
+		Roboto,
+		sans-serif;
+}
+
+#bar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 10px 20px;
+	border-bottom: 1px solid var(--line);
+	background: var(--panel);
+	position: sticky;
+	top: 0;
+	z-index: 5;
+}
+#bar .title {
+	font-weight: 700;
+	letter-spacing: 0.2px;
+}
+#bar .progress {
+	color: var(--muted);
+}
+
+.app {
+	padding: 16px 20px 28px;
+	max-width: 3400px;
+	margin: 0 auto;
+}
+
+/* lawnlord's score + note, on top of each page */
+.score-bar {
+	display: flex;
+	gap: 24px;
+	align-items: baseline;
+	padding: 12px 16px;
+	background: var(--panel);
+	border: 1px solid var(--line);
+	border-radius: 10px;
+	margin-bottom: 14px;
+}
+.score-bar.done {
+	border-color: var(--good);
+}
+.score-bar .score b {
+	font-size: 1.3em;
+	color: var(--accent);
+}
+.score-bar .note {
+	color: var(--muted);
+	flex: 1;
+}
+.score-bar .pageid {
+	color: var(--muted);
+	font-variant-numeric: tabular-nums;
+}
+
+/* side-by-side comparison — full desktop width */
+.compare {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 16px;
+}
+.compare figure {
+	margin: 0;
+}
+.compare figcaption {
+	color: var(--muted);
+	font-size: 12px;
+	letter-spacing: 0.6px;
+	margin-bottom: 6px;
+}
+.compare img {
+	width: 100%;
+	height: 76vh;
+	object-fit: contain;
+	background: #fff;
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	image-rendering: -webkit-optimize-contrast; /* crisp on high-DPI / 4K */
+}
+
+/* the review form (compare → rate → note → flag → reviewed) */
+.review {
+	margin-top: 16px;
+	padding: 14px 16px;
+	background: var(--panel);
+	border: 1px solid var(--line);
+	border-radius: 10px;
+	display: grid;
+	gap: 12px;
+}
+.review .rng {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+}
+.review .rng input[type="range"] {
+	flex: 1;
+	accent-color: var(--accent);
+}
+.review .rng .bad {
+	color: var(--bad);
+}
+.review .rng .good {
+	color: var(--good);
+}
+.review .rng output {
+	min-width: 3ch;
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+}
+.review .gap {
+	color: var(--muted);
+}
+.review .gap b {
+	color: var(--ink);
+}
+.review textarea {
+	width: 100%;
+	min-height: 70px;
+	resize: vertical;
+	background: var(--bg);
+	color: var(--ink);
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	padding: 10px;
+	font: inherit;
+}
+.review .flag {
+	color: var(--muted);
+}
+.review .actions {
+	display: flex;
+	gap: 10px;
+}
+.review button {
+	padding: 9px 16px;
+	border-radius: 8px;
+	border: 1px solid var(--line);
+	background: #1e222b;
+	color: var(--ink);
+	cursor: pointer;
+}
+.review button:disabled {
+	opacity: 0.4;
+	cursor: default;
+}
+.review button.primary {
+	background: var(--accent);
+	border-color: var(--accent);
+	color: #08111f;
+	font-weight: 600;
+}
