@@ -9,10 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`combo` provider** — register the reconciled best-of-both intake (the recommended source of
-  truth) as a first-class provider. It is Odyssey-shaped (carries the four Odyssey JSONs plus the
-  full document set), so it parses with the Odyssey adapter instead of relying on the silent
-  unknown-provider fallback.
+- **`combo` provider — cross-source merge.** Register the reconciled best-of-both intake (the
+  recommended source of truth) as a first-class provider with its own `parse_combo` adapter. It
+  takes the Odyssey export as the base (identity, parties, phase-tagged events, file-linked
+  documents) and merges the re:SearchTX `meta.json`: attorney **bar numbers** onto parties, a
+  **hearings** table (with results, e.g. the canceled bench trial), the **financial** summary
+  (assessment / payments / balance), and a richer **docket** (the registrar/judge's free-text
+  comments + per-document page counts) whose document names are linked back to the source PDFs.
+  New model types: `Hearing`, `Financials`, `DocketEntry`, `DocketDocument`, and `Attorney.number`.
+  Degrades to plain Odyssey parsing when no `meta.json` is present.
 
 ## [0.2.0] - 2026-06-16
 
