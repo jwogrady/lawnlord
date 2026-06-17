@@ -100,6 +100,11 @@ Background and reference (each linked here, the canonical entry point):
 - [`docs/architecture.md`](docs/architecture.md) — target architecture (background vision).
 - [`docs/ux.md`](docs/ux.md) — product north star (experience principles).
 
+## Contributing
+
+The working conventions, doc model, and non-negotiable engineering invariants are in
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
+
 ## Roadmap & history
 
 - **Where we're going:** [ROADMAP.md](ROADMAP.md). The plan itself is the
