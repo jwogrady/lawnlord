@@ -5,6 +5,25 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Documentation and project framing toward v0.2.0. Planned work — the case-workspace model, Odyssey
+intake, and the DuckDB `case → event → document → section → page` index — is tracked in
+[`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+### Added
+
+- `docs/ROADMAP.md` — phased, issue-ready roadmap (v0.1.0 → Milestone 1 → later epics).
+- `docs/plans/` — the v0.1.0 release record and the Milestone 1 design (case workspace + Odyssey
+  intake + DuckDB index).
+
+### Changed
+
+- README reframed as the project front door: honest v0.1.0 scope plus the case-understanding
+  direction and provider-based intake (Odyssey).
+- `pyproject.toml` metadata: refreshed description, added keywords, trove classifiers, and project
+  URLs.
+
 ## [0.1.0] - 2026-06-16
 
 First release: a standalone, deterministic legal court-record **exploder**.
