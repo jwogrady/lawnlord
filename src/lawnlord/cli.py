@@ -22,8 +22,12 @@ from .boundaries import load_manual_boundaries
 from .console import console
 from .corpus import write_corpus
 from .curation import load_curation
+from .db import apply_schema, open_case_db
+from .index import index_corpus
+from .ingest import ingest_case
 from .intake import load_intake, resolve_packet, scaffold
 from .reporting import report_archive, write_boundary_template
+from .workspace import Case
 
 
 def _add_root(parser: argparse.ArgumentParser) -> None:
@@ -93,11 +97,47 @@ def build_parser() -> argparse.ArgumentParser:
     _add_root(p_emit)
     _add_packet(p_emit)
 
+    p_index = sub.add_parser(
+        "index",
+        help="Explode a case intake folder's filings and index it into DuckDB",
+    )
+    p_index.add_argument(
+        "intake",
+        nargs="?",
+        default=".",
+        help="Provider intake folder (e.g. .../intake/ody) with case JSON + filings/",
+    )
+    p_index.add_argument(
+        "--case-dir", default=None, help="Output root for the corpus + DuckDB (default: cwd)"
+    )
+    p_index.add_argument(
+        "--force", action="store_true", help="Rebuild existing submission folders"
+    )
+
     return parser
 
 
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
+
+    if args.command == "index":
+        case = Case.from_intake(args.intake, case_dir=args.case_dir)
+        console.print(f"[bold]Case:[/] {case.case_number}  [dim]({case.intake_dir})[/]")
+        manual_boundaries = load_manual_boundaries(
+            case.intake_dir / "bundle-boundaries.json"
+        )
+        curation = load_curation(case.intake_dir / "corpus-curation.json")
+        manifest = write_corpus(
+            case.filings_dir, case.corpus_dir, args.force, manual_boundaries, curation
+        )
+        generated_at = manifest["generatedAt"]
+        con = open_case_db(case.duckdb_path)
+        apply_schema(con)
+        ingest_stats = ingest_case(con, case, generated_at)
+        index_stats = index_corpus(con, case, case.corpus_dir, generated_at)
+        con.close()
+        _print_index_summary(case, ingest_stats, index_stats)
+        return
 
     if args.command == "start":
         touched = scaffold(args.root, force=args.force)
@@ -168,6 +208,38 @@ def main(argv: list[str] | None = None) -> None:
         )
         _print_build_summary(manifest, corpus_dir)
         return
+
+
+def _print_index_summary(case, ingest_stats: dict, index_stats: dict) -> None:
+    table = Table(title="Case Index Summary")
+    table.add_column("Metric")
+    table.add_column("Value", justify="right")
+    table.add_row("Case", case.case_number)
+    table.add_row("Parties", str(ingest_stats["parties"]))
+    table.add_row("Events", str(ingest_stats["events"]))
+    table.add_row("Documents", str(ingest_stats["documents"]))
+    table.add_row("Document↔event links", str(ingest_stats["document_events"]))
+    table.add_row("Sections", str(index_stats["sections"]))
+    table.add_row("Chunks (pages)", str(index_stats["chunks"]))
+    table.add_row("Page-count mismatches", str(len(index_stats["mismatches"])))
+    table.add_row("Un-docketed documents", str(index_stats["orphan_documents"]))
+    table.add_row("DuckDB", str(case.duckdb_path))
+    console.print(table)
+    if ingest_stats["skipped_documents"]:
+        console.print(
+            f"[yellow]Skipped (no source PDF):[/] {len(ingest_stats['skipped_documents'])}"
+        )
+    if index_stats["orphan_documents"]:
+        console.print(
+            f"[yellow]Un-docketed documents indexed (not in filings.json):[/]"
+            f" {index_stats['orphan_documents']}"
+        )
+    for m in index_stats["mismatches"]:
+        console.print(
+            f"[yellow]Page-count mismatch:[/] {m['document_id']} "
+            f"declared {m['declared']} vs actual {m['actual']}"
+        )
+    console.print("[green]Done.[/]")
 
 
 def _print_build_summary(manifest: dict, corpus_dir: Path) -> None:
