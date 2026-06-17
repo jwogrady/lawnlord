@@ -35,10 +35,18 @@ lawnlord report [root]               # read-only archive/section report; never w
 lawnlord build [root]                # build the corpus from the intake packet
 lawnlord build [root] --force        # rebuild existing submissions (preserves reviewed analysis)
 lawnlord emit-boundaries [root]      # write a reviewable manual-boundary draft into the intake dir
+lawnlord index [intake]              # explode a provider intake's filings + index into DuckDB
+lawnlord pack [intake]               # package the source of truth: case.json + all filings in one zip
+lawnlord assemble [intake]           # reassemble images into one master PDF (lossless round-trip proof)
+lawnlord bundle [intake]             # the capstone: case wrapped with metadata + master + pages + index
+lawnlord query [--case-dir DIR] --text "…"   # read-only full-text search over the index (with provenance)
 ```
 
 `root` defaults to the current directory. `build`/`report`/`emit-boundaries` take `--packet` to
-point at a specific ZIP. `python -m lawnlord …` works as an alternative to the console script.
+point at a specific ZIP. `index`/`pack`/`assemble`/`bundle` take a provider **intake folder**
+(`[intake]`, e.g. `.../intake/combo`) holding the case JSON + `filings/`; `query` reads the built
+`lawnlord.duckdb` under `--case-dir`. `python -m lawnlord …` works as an alternative to the console
+script.
 
 ### Intake layout
 
