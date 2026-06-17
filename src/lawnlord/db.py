@@ -1,15 +1,18 @@
-"""DuckDB index for the ``case -> event -> document -> section -> page`` model.
+"""DuckDB index for the ``case -> event -> image -> document -> page`` model.
 
 This is the **only SQL site**. The database is a derived index — a pure
 function of the intake JSON plus the exploded corpus, fully regenerable. It
 never authors content. ``apply_schema`` is idempotent and versioned;
 ``open_case_db`` opens (creating if needed) the per-case database file.
 
-The M1 schema covers identity/docket (``cases``, ``parties``, ``events``,
-``documents``, ``document_events``) plus the exploder layer (``sections``,
-``chunks``); entities/relationships/analysis are deferred to later milestones.
-Metadata ingestion populates the docket tables (see :mod:`lawnlord.ingest`);
-``sections``/``chunks`` are populated by the corpus index step.
+Vocabulary (source-true, see docs/plans/v0.3.0): an **image** is a filed PDF
+(Odyssey's own term for it), and a **document** is a logical document *within*
+an image (a Motion, an Exhibit, an Affidavit) — what the exploder detects as a
+boundary section. So ``images`` holds the filed PDFs and ``documents`` holds the
+documents-within; ``chunks`` (one row per page) link to both. Metadata ingestion
+populates ``cases``/``parties``/``events``/``images``/``image_events`` (see
+:mod:`lawnlord.ingest`); ``documents``/``chunks`` come from the corpus index step.
+Entities/relationships/analysis are deferred to later milestones.
 """
 
 from __future__ import annotations
@@ -18,7 +21,9 @@ from pathlib import Path
 
 import duckdb
 
-SCHEMA_VERSION = 1
+# v2: re-leveled documents->images and sections->documents (docs/plans/v0.3.0).
+# Per-case DBs are regenerable, so the bump needs no in-place migration.
+SCHEMA_VERSION = 2
 
 # One statement per table; CREATE ... IF NOT EXISTS keeps apply_schema idempotent.
 _SCHEMA_STATEMENTS = (
@@ -62,7 +67,7 @@ _SCHEMA_STATEMENTS = (
     )
     """,
     """
-    CREATE TABLE IF NOT EXISTS documents (
+    CREATE TABLE IF NOT EXISTS images (
         id TEXT PRIMARY KEY,
         case_id TEXT NOT NULL,
         filename TEXT,
@@ -79,19 +84,19 @@ _SCHEMA_STATEMENTS = (
     )
     """,
     """
-    CREATE TABLE IF NOT EXISTS document_events (
-        document_id TEXT NOT NULL,
+    CREATE TABLE IF NOT EXISTS image_events (
+        image_id TEXT NOT NULL,
         event_id TEXT NOT NULL,
-        PRIMARY KEY (document_id, event_id)
+        PRIMARY KEY (image_id, event_id)
     )
     """,
     """
-    CREATE TABLE IF NOT EXISTS sections (
+    CREATE TABLE IF NOT EXISTS documents (
         id TEXT PRIMARY KEY,
         case_id TEXT NOT NULL,
-        document_id TEXT NOT NULL,
-        section_slug TEXT,
-        section_index INTEGER,
+        image_id TEXT NOT NULL,
+        document_slug TEXT,
+        document_index INTEGER,
         title TEXT,
         source_page_start INTEGER,
         source_page_end INTEGER,
@@ -107,8 +112,8 @@ _SCHEMA_STATEMENTS = (
     CREATE TABLE IF NOT EXISTS chunks (
         id TEXT PRIMARY KEY,
         case_id TEXT NOT NULL,
+        image_id TEXT NOT NULL,
         document_id TEXT NOT NULL,
-        section_id TEXT NOT NULL,
         text TEXT,
         page_number INTEGER,
         source_page_number INTEGER,
