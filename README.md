@@ -97,7 +97,7 @@ script.
 ## Development
 
 ```bash
-uv run pytest                        # characterization + end-to-end suite (155 tests)
+uv run pytest                        # characterization + end-to-end suite (174 tests)
 ```
 
 The tests are **characterization tests**: they pin current behavior, so a failing test is a
@@ -118,6 +118,9 @@ standards and code summaries — each is kept current or deleted when no longer 
 
 **Why & how you use it**
 - [`docs/motivation.md`](docs/motivation.md) — the problem, the solution, and how you use it and benefit.
+
+**Brand**
+- [`docs/brand/brand-guide.md`](docs/brand/brand-guide.md) — the brand kit: palette, shadcn/ui tokens, Tailwind preset, Google Fonts, swatch sheet, and a PDF guide.
 
 **Plan & history**
 - [`ROADMAP.md`](ROADMAP.md) — where we're going. The plan is the [GitHub issues](https://github.com/jwogrady/lawnlord/issues) assigned to each milestone; the roadmap narrates them.
