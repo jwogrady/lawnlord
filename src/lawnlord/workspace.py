@@ -60,17 +60,13 @@ class Case:
         intake_dir = Path(intake_dir).resolve()
         if not intake_dir.is_dir():
             raise FileNotFoundError(f"intake folder not found: {intake_dir}")
-        markers = ("case-summary.json", "case-history.json", "filings.json", "meta.json")
-        if not (
-            any((intake_dir / m).exists() for m in markers)
-            or (intake_dir / "filings").is_dir()
-        ):
+        if not (intake_dir / "filings").is_dir():
             raise FileNotFoundError(
-                f"{intake_dir} is not a provider intake folder. "
-                "compare/index/pack/assemble/bundle expect a provider export — case JSON "
-                "(case-summary.json / case-history.json / filings.json) plus a filings/ "
-                "directory, e.g. intake/combo or intake/ody. (A packet ZIP is the input for "
-                "`lawnlord build`, not for these commands.)"
+                f"{intake_dir} is not a provider intake folder — it has no filings/ directory "
+                "of PDFs. compare/index/pack/assemble/bundle expect a provider export (case JSON "
+                "+ a filings/ directory), e.g. intake/combo or intake/ody. A packet ZIP (e.g. "
+                "CA763CC5.zip) or a re:SearchTX download (zip + meta.json) is not yet a provider "
+                "folder — its PDFs must be extracted into filings/ first."
             )
         provider = intake_dir.name
         model = parse_provider(provider, intake_dir)
