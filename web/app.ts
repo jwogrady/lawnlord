@@ -25,8 +25,10 @@ type Page = {
 	mismatch: boolean;
 	page: number;
 	document: DocPart; // additive: the sub-unit (exhibit/part) this page is in
-	actual: string;
-	reconstructed: string;
+	actual: string; // the filed page, rendered
+	text: string; // our textual representation (what's in DuckDB)
+	textSource: string; // pdf | ocr | none
+	masterPage: number; // page in the assembled reconstruction PDF
 	score: number; // lawnlord confidence, 0..1
 	note: string;
 	review: Review;
@@ -46,7 +48,12 @@ type Integrity = {
 	flags: string[];
 };
 
-type Data = { case: string; integrity?: Integrity; pages: Page[] };
+type Data = {
+	case: string;
+	masterPdf?: string;
+	integrity?: Integrity;
+	pages: Page[];
+};
 
 const app = document.getElementById("app") as HTMLElement;
 const progressEl = document.getElementById("progress") as HTMLElement;
@@ -189,8 +196,15 @@ function render(): void {
         <span class="pageid">${esc(p.image)} · ${cnt}${p.review?.reviewed ? " · ✓ reviewed" : ""}</span>
       </section>
       <section class="compare">
-        <figure><figcaption>ACTUAL — original filing</figcaption><img src="${p.actual}" alt="actual page" /></figure>
-        <figure><figcaption>RECONSTRUCTED — from the data</figcaption><img src="${p.reconstructed}" alt="reconstructed page" /></figure>
+        <figure><figcaption>FILED PAGE — original</figcaption><img src="${p.actual}" alt="filed page" /></figure>
+        <figure class="textfig">
+          <figcaption>OUR TEXT${p.textSource ? ` — ${esc(p.textSource)}` : ""}${
+						data.masterPdf
+							? ` · <a href="/${esc(data.masterPdf)}#page=${p.masterPage}" target="_blank" rel="noopener">reconstructed PDF ↗</a>`
+							: ""
+					}</figcaption>
+          <div class="textpane">${p.text ? esc(p.text) : '<span class="empty">— no text extracted on this page —</span>'}</div>
+        </figure>
       </section>
       <section class="review">
         <label class="rng">
