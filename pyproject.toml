@@ -1,14 +1,40 @@
 [project]
 name = "lawnlord"
 version = "0.1.0"
-description = "Explode a legal court-record packet into a structured, citation-preserving five-level corpus (archive → submission → document → section → page)."
+description = "Local-first toolkit for legal court records: explode each case document into citation-preserving sections and pages with full provenance — the deterministic substrate for a case-understanding engine."
 readme = "README.md"
 requires-python = ">=3.13"
+keywords = [
+    "legal",
+    "litigation",
+    "court-records",
+    "pdf",
+    "provenance",
+    "case-management",
+    "pro-se",
+    "odyssey",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Legal Industry",
+    "Intended Audience :: Developers",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Text Processing",
+]
 dependencies = [
     "pymupdf>=1.27.2.3",
     "python-slugify>=8.0.4",
     "rich>=15.0.0",
 ]
+
+[project.urls]
+Repository = "https://github.com/jwogrady/lawnlord"
+Changelog = "https://github.com/jwogrady/lawnlord/blob/master/CHANGELOG.md"
+Roadmap = "https://github.com/jwogrady/lawnlord/blob/master/docs/ROADMAP.md"
 
 [project.scripts]
 lawnlord = "lawnlord.cli:main"
