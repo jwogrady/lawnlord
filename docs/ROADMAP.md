@@ -114,12 +114,11 @@ re-points that generic arc at the concrete end goal; treat the chain as authorit
 
 ---
 
-## Release hygiene (open)
+## Release hygiene
 
-These are real, currently-open gaps — not yet issues:
-
-- **No `LICENSE` file.** The repo and package declare no license; needed before any outside
-  distribution. (`pyproject.toml` should declare it; README should state it.)
-- **v0.3.0 is tagged but has no published GitHub release.** The tag `v0.3.0` exists; a
-  `gh release create v0.3.0` with CHANGELOG notes is pending.
-- **v0.1.0 was never tagged or released.** Only `v0.2.0` and `v0.3.0` are tagged.
+- ✅ **`LICENSE` added** — proprietary, all rights reserved. Declared in `pyproject.toml`
+  (`license = { file = "LICENSE" }` + the `License :: Other/Proprietary License` classifier), stated
+  in the README, and embedded by `uv build`.
+- ✅ **v0.3.0 released** on GitHub ([release](https://github.com/jwogrady/lawnlord/releases/tag/v0.3.0)).
+- **v0.1.0 was never tagged or released.** Only `v0.2.0` and `v0.3.0` are tagged; backfilling a
+  `v0.1.0` tag is optional and low-priority.
