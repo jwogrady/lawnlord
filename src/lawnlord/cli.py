@@ -259,6 +259,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--gpu", action="store_true", help="Run OCR on the GPU (CUDA) when available"
     )
 
+    p_ai = sub.add_parser(
+        "ai-page",
+        help="Transcribe + summarize + analyze one page image with Claude; print JSON",
+    )
+    p_ai.add_argument("image", help="Path to the page image (e.g. a compare artifact PNG)")
+    p_ai.add_argument(
+        "--model", default=None, help="Override the model (default: LAWNLORD_AI_MODEL or built-in)"
+    )
+
     p_combine = sub.add_parser(
         "combine",
         help="Compile the ody + txe portal views into one combo provider intake",
@@ -422,6 +431,16 @@ def _main(argv: list[str] | None = None) -> None:
 
         text, confidence = ocr_image(args.image, use_gpu=args.gpu)
         print(json.dumps({"text": text, "confidence": confidence}))
+        return
+
+    if args.command == "ai-page":
+        # Transcribe + summarize + analyze one page. Emit ONLY JSON on stdout so
+        # the web server can parse it; the engine (and API call) live here.
+        import json
+
+        from .ai import analyze_page
+
+        print(json.dumps(analyze_page(args.image, model=args.model)))
         return
 
     if args.command == "combine":

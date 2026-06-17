@@ -44,7 +44,26 @@ type Page = {
 	note: string;
 	review: Review;
 	revisions: Revision[]; // corrections appended after rev 0 (the original)
+	proposal: Proposal; // AI summary + analysis, #28: pending until accept/decline
 };
+
+// AI summary + analysis as a #28 proposal — additive, never overwrites the
+// record; the human accepts or declines it.
+type Analysis = {
+	docType?: string;
+	parties?: string[];
+	dates?: string[];
+	amounts?: string[];
+	keyPoints?: string[];
+	flags?: string[];
+};
+type Proposal = {
+	status: "pending" | "accepted" | "declined";
+	summary: string;
+	analysis: Analysis;
+	model: string;
+	at: string;
+} | null;
 
 type Integrity = {
 	renderedPages: number;
@@ -189,6 +208,49 @@ function renderModeToggle(): void {
 			render();
 		};
 	}
+}
+
+// The AI panel: a button to run the pass, and (once run) the summary + analysis
+// as a proposal the human accepts or declines. The transcription it produces
+// lands in the revision history (source "ai"), not here.
+function renderAiPanel(p: Page): string {
+	const pr = p.proposal;
+	const list = (label: string, items?: string[]) =>
+		items && items.length
+			? `<div class="arow"><span class="alabel">${label}</span><span class="aval">${items.map((x) => esc(x)).join(" · ")}</span></div>`
+			: "";
+	if (!pr) {
+		return `<section class="ai">
+      <div class="ai-h">AI — transcribe · summarize · analyze</div>
+      <button id="analyze" class="ai-run">✨ Analyze this page with AI</button>
+      <span id="aistate" class="savestate"></span>
+    </section>`;
+	}
+	const a = pr.analysis ?? {};
+	const badge =
+		pr.status === "accepted"
+			? `<span class="pstat ok">✓ accepted</span>`
+			: pr.status === "declined"
+				? `<span class="pstat no">✗ declined</span>`
+				: `<span class="pstat pend">proposal · pending</span>`;
+	return `<section class="ai ${pr.status}">
+    <div class="ai-h">AI summary + analysis ${badge}<span class="aimodel">${esc(pr.model)}</span></div>
+    <div class="asum">${esc(pr.summary)}</div>
+    <div class="ameta">
+      ${list("type", a.docType ? [a.docType] : [])}
+      ${list("parties", a.parties)}
+      ${list("dates", a.dates)}
+      ${list("amounts", a.amounts)}
+      ${a.keyPoints?.length ? `<div class="arow"><span class="alabel">key points</span><ul class="apts">${a.keyPoints.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>` : ""}
+      ${a.flags?.length ? `<div class="arow"><span class="alabel">flags</span><ul class="apts flags">${a.flags.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>` : ""}
+    </div>
+    <div class="actions">
+      <button id="accept" class="primary"${pr.status === "accepted" ? " disabled" : ""}>accept</button>
+      <button id="decline"${pr.status === "declined" ? " disabled" : ""}>decline</button>
+      <button id="reanalyze">⟳ re-analyze</button>
+      <span id="aistate" class="savestate"></span>
+    </div>
+  </section>`;
 }
 
 function render(): void {
@@ -374,6 +436,7 @@ function renderEnhanced(): void {
           <details class="revs"><summary>revision history (${revs.length})</summary>${history}</details>
         </figure>
       </section>
+      ${renderAiPanel(p)}
       <section class="review">
         <label class="rng">
           <span class="bad">bad</span>
@@ -466,6 +529,48 @@ function wire(p: Page, myScore: number): void {
 			await applyRevisions((await res.json()).history);
 		};
 	}
+
+	// AI pass: run / accept / decline. Transcription appends to history; the
+	// summary + analysis are a proposal the human decides on.
+	const aiState = document.getElementById("aistate") as HTMLElement | null;
+	async function runAi(): Promise<void> {
+		if (aiState) aiState.textContent = "analyzing… (sends the page to the API)";
+		const res = await fetch("/api/ai-page", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ id: p.id, image: p.actual }),
+		});
+		const out = await res.json();
+		if (!out.ok) {
+			if (aiState) aiState.textContent = `AI failed: ${out.error ?? "error"}`;
+			return;
+		}
+		p.revisions = out.history;
+		p.proposal = out.proposal;
+		render();
+	}
+	const analyzeBtn = document.getElementById("analyze");
+	if (analyzeBtn) (analyzeBtn as HTMLButtonElement).onclick = runAi;
+	const reanalyzeBtn = document.getElementById("reanalyze");
+	if (reanalyzeBtn) (reanalyzeBtn as HTMLButtonElement).onclick = runAi;
+	async function decide(status: "accepted" | "declined"): Promise<void> {
+		const res = await fetch("/api/proposal", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ id: p.id, status }),
+		});
+		const out = await res.json();
+		if (out.ok) {
+			p.proposal = out.proposal;
+			render();
+		}
+	}
+	const acceptBtn = document.getElementById("accept");
+	if (acceptBtn)
+		(acceptBtn as HTMLButtonElement).onclick = () => decide("accepted");
+	const declineBtn = document.getElementById("decline");
+	if (declineBtn)
+		(declineBtn as HTMLButtonElement).onclick = () => decide("declined");
 
 	(document.getElementById("prev") as HTMLButtonElement).onclick = () => {
 		if (idx > 0) idx--;

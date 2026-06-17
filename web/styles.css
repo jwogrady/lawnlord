@@ -389,6 +389,120 @@ body {
 	border-radius: 8px;
 }
 
+/* AI panel: transcribe (→ history) + summarize/analyze (→ #28 proposal) */
+.ai {
+	margin-top: 16px;
+	padding: 14px 16px;
+	background: var(--panel);
+	border: 1px solid var(--line);
+	border-radius: 10px;
+	display: grid;
+	gap: 10px;
+}
+.ai.accepted {
+	border-color: var(--grass);
+}
+.ai.declined {
+	opacity: 0.7;
+}
+.ai-h {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	font-family: var(--font-display);
+	color: var(--gold);
+	font-weight: 700;
+	letter-spacing: 0.4px;
+}
+.ai .aimodel {
+	margin-left: auto;
+	color: var(--muted);
+	font: 11px var(--font-sans);
+	letter-spacing: 0;
+}
+.ai-run {
+	justify-self: start;
+	padding: 9px 16px;
+	border-radius: 8px;
+	border: 1px solid var(--gold);
+	background: var(--gold);
+	color: var(--ink);
+	font-weight: 600;
+	cursor: pointer;
+}
+.pstat {
+	font-size: 12px;
+	border-radius: 999px;
+	padding: 1px 10px;
+}
+.pstat.pend {
+	color: var(--gold);
+	border: 1px dashed var(--gold-deep);
+}
+.pstat.ok {
+	color: var(--grass);
+	border: 1px solid var(--grass);
+}
+.pstat.no {
+	color: var(--bad);
+	border: 1px solid var(--bad);
+}
+.asum {
+	color: var(--cream);
+	font-size: 15px;
+}
+.ameta {
+	display: grid;
+	gap: 6px;
+}
+.arow {
+	display: flex;
+	gap: 10px;
+	align-items: baseline;
+}
+.arow .alabel {
+	color: var(--gold-deep);
+	font-size: 12px;
+	text-transform: uppercase;
+	letter-spacing: 0.5px;
+	min-width: 78px;
+}
+.arow .aval {
+	color: var(--cream);
+}
+.apts {
+	margin: 0;
+	padding-left: 18px;
+	color: var(--cream);
+}
+.apts.flags li {
+	color: var(--gold);
+}
+.ai .actions {
+	display: flex;
+	gap: 10px;
+	align-items: center;
+}
+.ai .actions button {
+	padding: 8px 14px;
+	border-radius: 8px;
+	border: 1px solid var(--line);
+	background: #1b2310;
+	color: var(--cream);
+	cursor: pointer;
+	font: inherit;
+}
+.ai .actions button.primary {
+	background: var(--gold);
+	border-color: var(--gold);
+	color: var(--ink);
+	font-weight: 600;
+}
+.ai .actions button:disabled {
+	opacity: 0.4;
+	cursor: default;
+}
+
 /* the review form (compare → rate → note → flag → reviewed) */
 .review {
 	margin-top: 16px;
