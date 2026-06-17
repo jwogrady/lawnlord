@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`combo` provider** — register the reconciled best-of-both intake (the recommended source of
+  truth) as a first-class provider. It is Odyssey-shaped (carries the four Odyssey JSONs plus the
+  full document set), so it parses with the Odyssey adapter instead of relying on the silent
+  unknown-provider fallback.
+
 ## [0.2.0] - 2026-06-16
 
 The case-understanding milestone: lawnlord now ingests a provider intake folder, indexes the whole
