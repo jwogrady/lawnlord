@@ -24,6 +24,7 @@ from pathlib import Path
 
 import duckdb
 
+from .confidence import score_case
 from .dates import extract_dates
 from .hashing import sha256_file
 from .workspace import Case
@@ -61,6 +62,9 @@ def index_corpus(
         con.execute("DELETE FROM documents WHERE case_id = ?", [case_id])
         con.execute("DELETE FROM extracted_dates WHERE case_id = ?", [case_id])
         stats = _index_documents(con, manifest, corpus_dir, case_id, generated_at)
+        # Score two-sided confidence (#33) in the same transaction, so the index
+        # and its readiness flags commit (or roll back) together.
+        stats.update(score_case(con, case_id))
         con.execute("COMMIT")
     except Exception:
         con.execute("ROLLBACK")

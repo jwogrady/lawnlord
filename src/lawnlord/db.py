@@ -29,9 +29,12 @@ import duckdb
 # a pointer to its preserved page image (page_image_path + page_image_sha256),
 # so a page is reconstructable from the data alone (#31).
 # v5: extracted_dates holds date-bearing facts found in page text (#36) — facts,
-# not interpretations; every row is needs_review. Per-case DBs are regenerable,
-# so the bumps need no in-place migration.
-SCHEMA_VERSION = 5
+# not interpretations; every row is needs_review.
+# v6: two-sided confidence (#33) — chunks carry confidence + ai_accessible +
+# needs_review (scored against Odyssey metadata and the source PDFs), rolled up
+# to documents.confidence and cases.confidence. Per-case DBs are regenerable, so
+# the bumps need no in-place migration.
+SCHEMA_VERSION = 6
 
 # One statement per table; CREATE ... IF NOT EXISTS keeps apply_schema idempotent.
 _SCHEMA_STATEMENTS = (
@@ -54,6 +57,7 @@ _SCHEMA_STATEMENTS = (
         source_url TEXT,
         last_refreshed TEXT,
         source_note TEXT,
+        confidence DOUBLE,
         created_at TEXT
     )
     """,
@@ -147,6 +151,7 @@ _SCHEMA_STATEMENTS = (
         detection_tier TEXT,
         document_family TEXT,
         needs_review BOOLEAN,
+        confidence DOUBLE,
         created_at TEXT
     )
     """,
@@ -170,6 +175,8 @@ _SCHEMA_STATEMENTS = (
         ocr_confidence DOUBLE,
         page_image_path TEXT,
         page_image_sha256 TEXT,
+        ai_accessible BOOLEAN,
+        needs_review BOOLEAN,
         created_at TEXT
     )
     """,

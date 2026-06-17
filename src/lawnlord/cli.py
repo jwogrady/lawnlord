@@ -41,6 +41,7 @@ from .query import (
     images_by_party,
     images_by_phase,
     needs_review_documents,
+    needs_review_pages,
     search_text,
     timeline,
 )
@@ -442,7 +443,8 @@ def _run_query(args) -> None:
         if args.text is not None:
             _render_rows(f"text: {args.text!r}", search_text(con, args.text, args.limit))
         elif args.needs_review:
-            _render_rows("needs review", needs_review_documents(con))
+            _render_rows("needs review: documents (boundary)", needs_review_documents(con))
+            _render_rows("needs review: pages (below confidence threshold)", needs_review_pages(con))
         elif args.phase is not None:
             _render_rows(f"phase: {args.phase}", images_by_phase(con, args.phase))
         elif args.event is not None:
