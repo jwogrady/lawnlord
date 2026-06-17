@@ -10,7 +10,7 @@ module owns it.
 from __future__ import annotations
 
 from .analysis_schema import legal_analysis_placeholders, write_json
-from .archive import inspect_archive, is_suspicious_entry
+from .archive import inspect_archive, inspect_folder, inspect_source, is_suspicious_entry
 from .boundaries import (
     CONFIDENCE_BOOKMARK,
     CONFIDENCE_FALLBACK,

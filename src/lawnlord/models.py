@@ -52,6 +52,9 @@ class PdfEntry:
     document_slug: str
     error: str = ""
     sections: list[SectionBoundary] = field(default_factory=list)
+    # Absolute path to the PDF on disk when the source is a folder of loose
+    # PDFs (folder mode). Empty for ZIP mode, where bytes come from the archive.
+    source_path: str = ""
 
 
 def unique_slug(base: str, fallback: str, used: set[str]) -> str:
