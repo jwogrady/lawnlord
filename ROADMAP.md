@@ -33,7 +33,7 @@ not by jumping features ahead for urgency, but by building each layer on the one
 
 ## Governing principles
 
-These constrain every issue below. (Captured in design notes; see also `docs/context.md`.)
+These constrain every issue below. (See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the engineering invariants.)
 
 1. **Mirror the court schema exactly.** Explode each source to the court-level schema as it lives in
    the originating system. That mirrored record is the immutable **"what is" map**.
@@ -110,7 +110,7 @@ Build top to bottom. Each milestone depends on the one above it.
 ## Earlier vision epics (superseded framing)
 
 The original `M2–M7` epics (extraction depth, entity layer, relationships, reasoning, drafting,
-agents/UX) and the full vision live in [`docs/context.md`](docs/context.md). The prerequisite chain above
+agents/UX) and the full architecture vision live in [`docs/architecture.md`](docs/architecture.md). The prerequisite chain above
 re-points that generic arc at the concrete end goal; treat the chain as authoritative for sequencing.
 
 ---
