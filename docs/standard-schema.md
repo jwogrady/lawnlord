@@ -128,8 +128,11 @@ Breaking an image into documents-within (Motion, Exhibit A, …) is *additive* a
 
 ## Status of this standard
 
-This document is the *target*. The current `combo` adapter populates much of it but (a) drops some
-fields (citationNumber, disposition.comment, transactions[], aliases, freshness) and (b) was framed
-as conflict-reconciliation rather than mirror-unification. Aligning the `combo`/canonical output to
-this standard — field-complete, ISO/canonical-normalized, source-tagged — is the work. See
-`docs/plans/v0.3.0-complete-truth-and-full-text.md` Phase 2.
+The down-to-image mirror shipped in **v0.3.0**: field-complete mirror-view readers (nothing dropped,
+[#17](https://github.com/jwogrady/lawnlord/issues/17)) feed a mirror-unifier into canonical
+`case.json` v2.0 ([#18](https://github.com/jwogrady/lawnlord/issues/18)), source-tagged and
+normalized — mirror-unification, not conflict-reconciliation. The decisions still open *below* the
+image line — whether `section` returns as a first-class level, and the single `document` glossary —
+are tracked in [#34](https://github.com/jwogrady/lawnlord/issues/34) /
+[#35](https://github.com/jwogrady/lawnlord/issues/35) (v0.4.0). See [CHANGELOG](../CHANGELOG.md) for
+what shipped and [ROADMAP](ROADMAP.md) for what's next.

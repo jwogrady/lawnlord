@@ -1,10 +1,12 @@
 # Lawnlord Architecture
 
-> **Status — vision document.** This describes lawnlord's *target architecture and roadmap*, not
-> the shipped release. v0.1.0 implements only the deterministic court-record exploder
-> (archive → submission → document → section → page); the DuckDB index, entity graph, agents, and
-> analysis/strategy/drafting layers below are future work. See the [README](../README.md) and
-> [CHANGELOG](../CHANGELOG.md) for what exists today.
+> **Status — background vision.** This sketches lawnlord's *target architecture*; it is not the
+> authoritative plan or status. Through **v0.3.0** the case-record foundation has shipped (exploder,
+> DuckDB index `case → event → image → document → page`, OCR, full-text search, lossless bundle).
+> The entity graph, relationships, and analysis/strategy/drafting layers below are **additive**
+> future work, sequenced in the prerequisite chain. For what's shipped see
+> [CHANGELOG](../CHANGELOG.md); for what's planned — and the GitHub issues that *are* the plan — see
+> [ROADMAP](ROADMAP.md). The commit is always the present.
 
 ## Overview
 
@@ -185,6 +187,12 @@ Example:
 
 ## 6. Entity Layer
 
+> **Additive, post-readiness-gate (v0.6.0+).** The entity layer is *not* part of the mirrored court
+> record. It begins only after the "is" layer is canonical (every page reconstructable text). Every
+> entity is a machine **proposal** carrying provenance (artifact/page/paragraph/span) and
+> `needsReview: true` — accepted or declined by a human; only accepted entities are treated as truth
+> (issue #28).
+
 Documents are decomposed into discrete legal entities.
 
 Core entities include:
@@ -233,9 +241,12 @@ Court Order → creates → Deadline
 Event → supported by → Artifact
 ```
 
-The relationship layer allows Lawnlord to reason across the case.
+The relationship layer surfaces connections for the human to reason across the case. Like the entity
+layer, every relationship is an additive, accept/decline proposal (v0.6.0+) — never a
+machine-rendered legal conclusion.
 
-This is where the system moves from file organization to legal understanding.
+This is where the work moves from file organization to *assisted* legal understanding: the human's
+understanding, supported by the graph.
 
 ---
 
@@ -598,6 +609,12 @@ Embeddings can be added later.
 ---
 
 # AI Agent Architecture
+
+> **Agents are execution tools, not decision-makers.** They handle deterministic, repeatable work —
+> classify, OCR, chunk, extract, compute timelines, draft. Anything an agent produces about the law
+> or strategy is a **proposal** the human accepts or declines (issue #28); legal conclusions are
+> never machine-rendered. The Research / Analysis / Strategy agents below *surface* candidates and
+> *flag* gaps — they do not decide. The human decides.
 
 Lawnlord can be organized around specialized agents.
 

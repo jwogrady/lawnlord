@@ -10,6 +10,7 @@ state is always the commit; neither document describes the live present. When a 
 entries here graduate to the changelog, carrying the same issue and milestone links across the
 boundary.
 
+**The plan itself is the GitHub issues** assigned to each milestone; this roadmap narrates them.
 Every planned item links to its **GitHub issue** and its **release milestone** so this document and
 the tracker stay in sync. Issues: <https://github.com/jwogrady/lawnlord/issues> ·
 Milestones: <https://github.com/jwogrady/lawnlord/milestones>.
