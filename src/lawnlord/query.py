@@ -11,6 +11,8 @@ the logical documents within an image, and ``chunks`` are pages.
 
 from __future__ import annotations
 
+import re
+
 import duckdb
 
 
@@ -124,3 +126,64 @@ def images_by_party(con: duckdb.DuckDBPyConnection, party: str) -> list[dict]:
         """,
         ["%" + party.lower() + "%"],
     )
+
+
+_DEADLINE_RE = re.compile(
+    r"\b(deadline|due|expire\w*|respond|response|answer|hearing|trial|sale|"
+    r"foreclosure|redemption|notice)\b",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_deadline(text: str) -> bool:
+    return bool(_DEADLINE_RE.search(text or ""))
+
+
+def timeline(con: duckdb.DuckDBPyConnection) -> dict:
+    """The factual case timeline, derived only from the record: docket events
+    and the date-bearing facts extracted from page text (#36). Read-only.
+
+    Returns ``{"dated": [...], "undated": [...]}``. Each item carries its
+    ``date`` (ISO), ``source`` ("docket" or "extracted"), a ``label``, a
+    provenance ``detail``, and a ``flag`` set when the text *looks like* a
+    deadline / hearing / sale — surfaced for review, not interpreted (deciding
+    what a date means is the human's job). Nothing is hand-entered or invented;
+    undated docket events are listed separately, never given a guessed date.
+    """
+    items: list[dict] = []
+    for e in _rows(
+        con, "SELECT date, phase, event_type, description, party FROM events", []
+    ):
+        label = e.get("event_type") or e.get("description") or ""
+        items.append(
+            {
+                "date": e.get("date") or "",
+                "source": "docket",
+                "label": label,
+                "detail": e.get("phase") or e.get("party") or "",
+                "flag": _looks_like_deadline(f"{label} {e.get('description') or ''}"),
+            }
+        )
+    for d in _rows(
+        con,
+        "SELECT date, snippet, image_id, source_page_number FROM extracted_dates",
+        [],
+    ):
+        snippet = d.get("snippet") or ""
+        items.append(
+            {
+                "date": d.get("date") or "",
+                "source": "extracted",
+                "label": snippet,
+                "detail": f"{d.get('image_id')} p.{d.get('source_page_number')}",
+                "flag": _looks_like_deadline(snippet),
+            }
+        )
+    dated = sorted(
+        (i for i in items if i["date"]),
+        key=lambda i: (i["date"], i["source"], i["label"]),
+    )
+    undated = sorted(
+        (i for i in items if not i["date"]), key=lambda i: (i["source"], i["label"])
+    )
+    return {"dated": dated, "undated": undated}
