@@ -9,9 +9,9 @@ can never be overridden by an overlay.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from .console import console
-from .paths import CURATION_FILENAME, FILINGS_DIR
 
 # The only fields a curation overlay may set. Provenance, page ranges,
 # hashes, slugs, boundary tier/confidence, paths, and citations are always
@@ -29,11 +29,10 @@ ALLOWED_CURATED_FIELDS = {
 }
 
 
-def load_curation() -> dict:
-    """Optional src/filings/corpus-curation.json (Feature 10).
+def load_curation(path: Path) -> dict:
+    """Load the optional curated-metadata overlay from the given path.
     Returns {} when absent or unparseable; a bad file never crashes the
     build, it only loses the overlay."""
-    path = FILINGS_DIR / CURATION_FILENAME
     if not path.exists():
         return {}
 

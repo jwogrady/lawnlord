@@ -29,6 +29,9 @@ archive → submission → document → section → page
 metadata, a document `toc.json`, and a top-level `manifest.json`. Every page carries the citable
 `sourcePageNumber` and a citation string, so nothing loses its provenance.
 
+> **Status:** standalone, installable tool with an intake-folder workflow. Inputs and output
+> are resolved from an intake the consumer project supplies — not a hardcoded layout.
+
 ## Where it's going
 
 The source of truth is an **intake folder organized by provider** (the first is `ody` = **Odyssey**,
@@ -48,17 +51,41 @@ uv add lawnlord                      # as a project dependency
 
 ## Usage
 
+lawnlord operates on an **intake folder** — a directory holding the source packet ZIP plus
+optional curated inputs, with generated output written alongside. `lawnlord start` scaffolds it.
+
 ```bash
-lawnlord --dry-run                   # read-only archive/PDF/section report; writes nothing
-lawnlord                             # build the corpus (skips existing submissions)
-lawnlord --force                     # full rebuild (preserves reviewed page analysis)
-lawnlord --corpus-dir <dir>          # write the corpus elsewhere
-lawnlord <path-to-zip>               # explicit archive instead of the default search
-lawnlord --emit-boundary-template    # write a reviewable manual-boundary draft; writes nothing else
+lawnlord start [root]                # scaffold intake/ + lawnlord.toml + an intake README
+# ... drop the packet ZIP into the intake dir ...
+lawnlord report [root]               # read-only archive/section report; never writes
+lawnlord build [root]                # build the corpus from the intake packet
+lawnlord build [root] --force        # rebuild existing submissions (preserves reviewed analysis)
+lawnlord emit-boundaries [root]      # write a reviewable manual-boundary draft into the intake dir
 ```
 
-`python -m lawnlord …` works as an alternative to the `lawnlord` console script. The corpus is
-written to `dist/corpus/` by default (generated, gitignored).
+`root` defaults to the current directory. `build`/`report`/`emit-boundaries` take `--packet` to
+point at a specific ZIP. `python -m lawnlord …` works as an alternative to the console script.
+
+### Intake layout
+
+```text
+<root>/
+  lawnlord.toml      # optional config: intake/corpus dir names (defaults below)
+  intake/            # inputs: the packet ZIP + optional curated files
+    <packet>.zip
+    bundle-boundaries.json   (optional — manual section boundaries, Tier 1)
+    corpus-curation.json     (optional — curated metadata overlay)
+  corpus/            # generated output (regenerable)
+```
+
+`lawnlord.toml` can remap these so a project with an existing layout adopts lawnlord without
+moving files:
+
+```toml
+[lawnlord]
+intake = "src/filings"
+corpus = "dist/corpus"
+```
 
 ## Architecture
 
@@ -67,8 +94,8 @@ Logic lives in the `lawnlord` package (`src/lawnlord/`); each module owns one co
 
 | Module | Owns |
 | --- | --- |
-| `cli.py` | argparse + run dispatch (`--dry-run` / `--emit-boundary-template` / build) |
-| `paths.py` | repo/intake layout, zip resolution, input filenames |
+| `cli.py` | subcommands (`start` / `report` / `build` / `emit-boundaries`) + dispatch |
+| `intake.py` | intake-folder contract: config (`lawnlord.toml`), packet resolution, `scaffold` |
 | `hashing.py` | `sha256_bytes` / `sha256_file` / `now_iso` primitives |
 | `models.py` | `SectionBoundary`, `PdfEntry`, `unique_slug` |
 | `boundaries.py` | four-tier section detection, heading helpers, `section_summary` |
@@ -77,7 +104,7 @@ Logic lives in the `lawnlord` package (`src/lawnlord/`); each module owns one co
 | `analysis_schema.py` | page-analysis placeholders + `write_json` |
 | `archive.py` | `inspect_archive` + zip-entry path-traversal safety |
 | `corpus.py` | `explode_document`, `write_corpus`, manifest builders |
-| `reporting.py` | `--dry-run` report + boundary-template emit |
+| `reporting.py` | archive report + boundary-template emit |
 | `console.py` | shared Rich `console` singleton |
 
 ## Detection tiers
@@ -103,11 +130,13 @@ curation overlay.
 ## Development
 
 ```bash
-uv run pytest                        # characterization suite (62 tests; baseline skips without a packet)
+uv run pytest                        # characterization + end-to-end suite (69 tests)
 ```
 
 The tests are **characterization tests**: they pin current behavior, so a failing test is a
-behavior change to approve by hand, not to silently update.
+behavior change to approve by hand, not to silently update. `test_end_to_end.py` builds a tiny
+corpus from synthetic PDFs and freezes the structural invariants (full page coverage, citation
+model, unfilled page-analysis stub) that must hold for any input.
 
 ## Roadmap
 
