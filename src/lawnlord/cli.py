@@ -397,6 +397,10 @@ def _print_index_summary(case, ingest_stats: dict, index_stats: dict) -> None:
     table.add_row("Image↔event links", str(ingest_stats["image_events"]))
     table.add_row("Documents (within images)", str(index_stats["documents"]))
     table.add_row("Chunks (pages)", str(index_stats["chunks"]))
+    table.add_row(
+        "Full-text index (BM25)",
+        "[green]built[/]" if index_stats.get("fts") else "[yellow]LIKE fallback[/]",
+    )
     table.add_row("Page-count mismatches", str(len(index_stats["mismatches"])))
     table.add_row("Un-docketed images", str(index_stats["orphan_images"]))
     table.add_row("DuckDB", str(case.duckdb_path))

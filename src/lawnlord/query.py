@@ -20,22 +20,41 @@ def _rows(con: duckdb.DuckDBPyConnection, sql: str, params: list) -> list[dict]:
     return [dict(zip(cols, row)) for row in cur.fetchall()]
 
 
+_BM25_SQL = """
+    SELECT c.image_id, i.title AS image_title, c.source_page_number,
+           c.citation_display, c.text,
+           fts_main_chunks.match_bm25(c.id, ?) AS score
+    FROM chunks c
+    LEFT JOIN images i ON i.id = c.image_id
+    WHERE score IS NOT NULL
+    ORDER BY score DESC, c.image_id, c.source_page_number
+    LIMIT ?
+"""
+
+_LIKE_SQL = """
+    SELECT c.image_id, i.title AS image_title, c.source_page_number,
+           c.citation_display, c.text
+    FROM chunks c
+    LEFT JOIN images i ON i.id = c.image_id
+    WHERE lower(c.text) LIKE ?
+    ORDER BY c.image_id, c.source_page_number
+    LIMIT ?
+"""
+
+
 def search_text(con: duckdb.DuckDBPyConnection, text: str, limit: int = 50) -> list[dict]:
-    """Pages whose extracted text contains ``text`` (case-insensitive), each
-    with its image title, source page, and citation."""
-    return _rows(
-        con,
-        """
-        SELECT c.image_id, i.title AS image_title, c.source_page_number,
-               c.citation_display, c.text
-        FROM chunks c
-        LEFT JOIN images i ON i.id = c.image_id
-        WHERE lower(c.text) LIKE ?
-        ORDER BY c.image_id, c.source_page_number
-        LIMIT ?
-        """,
-        ["%" + text.lower() + "%", limit],
-    )
+    """Pages matching ``text``, each with its image title, source page, and
+    citation. Uses the ranked BM25 full-text index (relevance-ordered, multi-term
+    and phrase aware) when the FTS extension and index are available; otherwise
+    falls back to a case-insensitive substring scan so search always works."""
+    from .db import load_fts
+
+    if load_fts(con):
+        try:
+            return _rows(con, _BM25_SQL, [text, limit])
+        except Exception:
+            pass  # no FTS index on this DB — fall back to substring
+    return _rows(con, _LIKE_SQL, ["%" + text.lower() + "%", limit])
 
 
 def needs_review_documents(con: duckdb.DuckDBPyConnection) -> list[dict]:
