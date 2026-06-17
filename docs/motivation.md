@@ -39,8 +39,8 @@ makes you fast and certain enough to render your own.
    whole `case → event → image → document → page` model into DuckDB.
 3. **Bundle** — get one self-contained, cross-linked package: the metadata wrapper, the preserved
    originals, a lossless master PDF, per-page searchable text, and the queryable index.
-4. **Search & see the timeline** — full-text search with provenance, and a timeline derived from the
-   filing dates and the court rules (never from dates you type in).
+4. **Search the record** — full-text search with provenance (`query`): every hit traces to its
+   source page.
 5. **Curate the knowledge base** — add the statutes, rules, and governing documents the case turns
    on, as links / JSON / PDFs.
 6. **Review proposed analysis** — accept or decline machine-proposed facts, deadlines, and grounds;
@@ -49,7 +49,9 @@ makes you fast and certain enough to render your own.
    drafts (e.g. to set aside a judgment), every statement traceable to evidence and authority — for
    you to review and file.
 
-Steps 1–4 ship today; 5–7 are the prerequisite chain in the [ROADMAP](../ROADMAP.md).
+Steps 1–4 ship today. The computed deadline **timeline** (filing dates + court rules), the
+**knowledge base** (5), **accept/decline analysis** (6), and the **number + motions** (7) are the
+prerequisite chain in the [ROADMAP](../ROADMAP.md) — never from dates you type in.
 
 ## What you get
 
