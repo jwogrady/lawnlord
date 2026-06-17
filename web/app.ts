@@ -55,10 +55,36 @@ type Data = {
 	pages: Page[];
 };
 
+// The Original layer: the court's record, verbatim. Two modes (see memory):
+// Original = court metadata only; Enhanced = our additive classification.
+type Party = { role: string; name: string; representation: string };
+type RegEntry = {
+	date: string;
+	type: string;
+	party: string;
+	description: string;
+	filing: { title: string; image: string; declaredPages: number } | null;
+};
+type Manifest = {
+	case: string;
+	court?: string;
+	judicialOfficer?: string;
+	caseType?: string;
+	status?: string;
+	dateFiled?: string;
+	parties: Party[];
+	registerOfActions: RegEntry[];
+};
+
 const app = document.getElementById("app") as HTMLElement;
 const progressEl = document.getElementById("progress") as HTMLElement;
+const modeEl = document.getElementById("mode") as HTMLElement;
 
 let data: Data;
+let manifest: Manifest = { case: "", parties: [], registerOfActions: [] };
+let mode: "original" | "enhanced" =
+	(localStorage.getItem("lawnlord-mode") as "original" | "enhanced") ??
+	"enhanced";
 let idx = 0;
 
 function esc(s: string): string {
@@ -112,13 +138,98 @@ function filingGroups(): FilingGroup[] {
 }
 
 async function load(): Promise<void> {
-	data = await (await fetch("/api/pages")).json();
+	const [pagesRes, manRes] = await Promise.all([
+		fetch("/api/pages"),
+		fetch("/api/manifest"),
+	]);
+	data = await pagesRes.json();
+	manifest = await manRes.json();
 	idx = data.pages.findIndex((p) => !p.review?.reviewed);
 	if (idx < 0) idx = 0;
 	render();
 }
 
+function renderModeToggle(): void {
+	modeEl.innerHTML = `
+    <button class="modebtn${mode === "original" ? " on" : ""}" data-mode="original" title="Court metadata only">Original</button>
+    <button class="modebtn${mode === "enhanced" ? " on" : ""}" data-mode="enhanced" title="Our additive classification + analysis">Enhanced</button>`;
+	for (const el of modeEl.querySelectorAll(".modebtn")) {
+		(el as HTMLButtonElement).onclick = () => {
+			mode = (el as HTMLElement).dataset.mode as "original" | "enhanced";
+			localStorage.setItem("lawnlord-mode", mode);
+			render();
+		};
+	}
+}
+
 function render(): void {
+	renderModeToggle();
+	if (mode === "original") {
+		renderOriginal();
+		return;
+	}
+	renderEnhanced();
+}
+
+// ORIGINAL — the court's register of actions, verbatim, plus the filed page
+// (the court's own document). No text, scores, parts, or reconstruction.
+function renderOriginal(): void {
+	const m = manifest;
+	progressEl.textContent = `${m.registerOfActions.length} docket entries · ${m.case}`;
+	const filings = filingGroups();
+	const curImg = data.pages[idx]?.image;
+	const roa = m.registerOfActions
+		.map((e) => {
+			const f = e.filing;
+			const target = f ? filings.find((g) => g.image === f.image) : undefined;
+			const first = target ? target.first : -1;
+			const isCur = !!f && f.image === curImg;
+			const badge = e.type ? `<span class="fam">${esc(e.type)}</span>` : "";
+			const pp = f ? `${f.declaredPages} pp` : "no document";
+			const title = f ? esc(f.title) : esc(e.description || e.type);
+			return `<button class="docitem${isCur ? " cur" : ""}" data-first="${first}"${first < 0 ? " disabled" : ""}>
+        <span class="doctitle"><span class="docn">${esc(e.date)}</span> ${title}</span>
+        <span class="docmeta">${badge}${pp}${e.party ? ` · ${esc(e.party)}` : ""}</span>
+      </button>`;
+		})
+		.join("");
+	const p = data.pages[idx];
+	const viewer = p
+		? `<section class="score-bar"><span class="doc">${esc(p.filing.title)}</span>
+        <span class="pageid">${esc(p.image)} · p.${p.page} of ${p.actualPages ?? "?"}</span></section>
+      <section class="single"><figure><figcaption>FILED PAGE — original (court record)</figcaption>
+        <img src="${p.actual}" alt="filed page" /></figure></section>
+      <section class="review"><div class="actions">
+        <button id="prev"${idx === 0 ? " disabled" : ""}>‹ prev</button>
+        <button id="next"${idx === data.pages.length - 1 ? " disabled" : ""}>next ›</button>
+      </div></section>`
+		: `<section class="score-bar"><span class="note">Select a filing from the register.</span></section>`;
+	app.innerHTML = `<aside class="docs"><div class="docs-h">Register of actions — ${esc(m.case)}</div>${roa}</aside>
+    <section class="pane">${viewer}</section>`;
+	for (const el of app.querySelectorAll(".docitem")) {
+		(el as HTMLButtonElement).onclick = () => {
+			const f = Number((el as HTMLElement).dataset.first);
+			if (f >= 0) {
+				idx = f;
+				render();
+			}
+		};
+	}
+	const prev = document.getElementById("prev") as HTMLButtonElement | null;
+	const next = document.getElementById("next") as HTMLButtonElement | null;
+	if (prev)
+		prev.onclick = () => {
+			if (idx > 0) idx--;
+			render();
+		};
+	if (next)
+		next.onclick = () => {
+			if (idx < data.pages.length - 1) idx++;
+			render();
+		};
+}
+
+function renderEnhanced(): void {
 	const p = data.pages[idx];
 	const myScore = Math.round(p.score * 100);
 	const rating = p.review ? p.review.rating : myScore; // default to lawnlord's
