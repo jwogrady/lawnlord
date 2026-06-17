@@ -26,6 +26,7 @@ classifiers = [
     "Topic :: Text Processing",
 ]
 dependencies = [
+    "duckdb>=1.1",
     "pymupdf>=1.27.2.3",
     "python-slugify>=8.0.4",
     "rich>=15.0.0",
