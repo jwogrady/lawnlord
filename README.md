@@ -1,16 +1,17 @@
 # lawnlord
 
-*Turn a court record into a case you can actually understand — verifiable, searchable, and traceable to the source.*
+*Ingest a case's filings and sort them into the schema you need to analyze the case — and fight it. Verifiable, and traceable to the source.*
 
 ![version](https://img.shields.io/badge/version-0.3.0-blue)
 ![python](https://img.shields.io/badge/python-3.13%2B-blue)
-![tests](https://img.shields.io/badge/tests-155%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-174%20passing-brightgreen)
 ![status](https://img.shields.io/badge/status-alpha-orange)
 ![license](https://img.shields.io/badge/license-proprietary-red)
 
-A local-first **legal case-understanding engine**. Point it at a court record and it produces a
-verifiable, searchable, analyzable dataset of the case — the trustworthy substrate for understanding
-what happened, what is actually owed, and what to file next.
+A local-first **legal case-understanding engine**. It **ingests a case's filings** (from one or both
+court portals) and **sorts them into the schema you need to analyze the case and fight it** — case →
+parties/events → filed images → the documents and exhibits within them — a verifiable, searchable
+substrate where every conclusion traces back to a real source page.
 
 It is **not** a PDF splitter. lawnlord mirrors the court's filed record *exactly*, extracts every
 page to searchable text, and **proves** the result is lossless against the originals — so every
