@@ -40,6 +40,12 @@ Roadmap = "https://github.com/jwogrady/lawnlord/blob/master/docs/ROADMAP.md"
 [project.scripts]
 lawnlord = "lawnlord.cli:main"
 
+[project.optional-dependencies]
+ocr = [
+    "numpy>=2.4.6",
+    "rapidocr-onnxruntime>=1.4.4",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",

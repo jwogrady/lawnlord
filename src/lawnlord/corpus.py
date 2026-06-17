@@ -47,6 +47,7 @@ def explode_document(
     generated_at: str = "",
     document_curation: dict | None = None,
     curation_defaults: dict | None = None,
+    ocr=None,
 ) -> tuple[list[dict], dict, dict]:
     """Explode one Document/Source PDF into section PDFs, page PDFs, page
     text, page analysis stubs, per-section metadata, and a document toc.json.
@@ -109,6 +110,13 @@ def explode_document(
 
                 source_page = source_doc[source_page_number - 1]
                 page_text = source_page.get_text("text") or ""
+                text_source = "native"
+                ocr_confidence = None
+                # Recover text for a scanned page (no embedded text) when OCR
+                # is enabled. OCR text is machine-generated and tagged as such.
+                if not page_text.strip() and ocr is not None:
+                    page_text, ocr_confidence = ocr(source_page)
+                    text_source = "ocr"
                 if not page_text.strip():
                     empty_text_pages += 1
                 (document_dir / text_rel).write_text(page_text, encoding="utf-8")
@@ -128,6 +136,8 @@ def explode_document(
                     "pageLabel": source_page.get_label() or str(source_page_number),
                     "sourcePdf": page_pdf_rel,
                     "sourceText": text_rel,
+                    "textSource": text_source,
+                    "ocrConfidence": ocr_confidence,
                     "citation": {
                         "lowLevel": f"{ids['documentSlug']} p.{source_page_number}",
                         "display": (
@@ -374,6 +384,7 @@ def write_corpus(
     manual_boundaries: dict,
     curation: dict | None = None,
     curation_path: Path | None = None,
+    ocr=None,
 ) -> dict:
     """Write the Archive -> Submission -> Document corpus model and explode
     every document into section PDFs, page PDFs, page text, page analysis
@@ -546,6 +557,7 @@ def write_corpus(
                     generated_at,
                     document_curation,
                     curation_defaults,
+                    ocr=ocr,
                 )
             preserved_total += explode_stats["reviewedAnalysisPreserved"]
             curated_sections_applied += explode_stats["curatedSectionsApplied"]
