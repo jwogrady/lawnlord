@@ -26,6 +26,7 @@ from .db import apply_schema, open_case_db
 from .index import index_corpus
 from .ingest import ingest_case
 from .intake import load_intake, resolve_packet, scaffold
+from .ocr import make_ocr
 from .query import (
     documents_by_event,
     documents_by_party,
@@ -55,6 +56,15 @@ def _add_packet(parser: argparse.ArgumentParser) -> None:
             "(default: the single *.zip in the intake dir)"
         ),
     )
+
+
+def _ocr_for(args):
+    """Build the OCR backend from --ocr/--gpu flags (--gpu implies OCR)."""
+    if getattr(args, "gpu", False):
+        return make_ocr(use_gpu=True)
+    if getattr(args, "ocr", False):
+        return make_ocr()
+    return None
 
 
 def _resolve_source(intake, explicit) -> Path:
@@ -96,6 +106,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_build.add_argument(
         "--force", action="store_true", help="Rebuild existing submission folders"
     )
+    p_build.add_argument(
+        "--ocr", action="store_true",
+        help="OCR scanned pages with no text layer (needs the 'ocr' extra)",
+    )
+    p_build.add_argument(
+        "--gpu", action="store_true",
+        help="Run OCR on the GPU (CUDA) when available; implies --ocr",
+    )
 
     p_emit = sub.add_parser(
         "emit-boundaries",
@@ -119,6 +137,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_index.add_argument(
         "--force", action="store_true", help="Rebuild existing submission folders"
+    )
+    p_index.add_argument(
+        "--ocr", action="store_true",
+        help="OCR scanned pages with no text layer (needs the 'ocr' extra)",
+    )
+    p_index.add_argument(
+        "--gpu", action="store_true",
+        help="Run OCR on the GPU (CUDA) when available; implies --ocr",
     )
 
     p_query = sub.add_parser(
@@ -154,7 +180,8 @@ def main(argv: list[str] | None = None) -> None:
         )
         curation = load_curation(case.intake_dir / "corpus-curation.json")
         manifest = write_corpus(
-            case.filings_dir, case.corpus_dir, args.force, manual_boundaries, curation
+            case.filings_dir, case.corpus_dir, args.force, manual_boundaries, curation,
+            ocr=_ocr_for(args),
         )
         generated_at = manifest["generatedAt"]
         con = open_case_db(case.duckdb_path)
@@ -231,6 +258,7 @@ def main(argv: list[str] | None = None) -> None:
             manual_boundaries,
             curation,
             curation_path=intake.curation_path,
+            ocr=_ocr_for(args),
         )
         _print_build_summary(manifest, corpus_dir)
         return
