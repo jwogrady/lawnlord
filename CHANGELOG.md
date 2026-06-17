@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`lawnlord bundle` — the capstone (final output).** Wrap a complete case into one
+  self-contained, cross-linked zip: `case.json` (the standard metadata wrapper, from
+  `to_canonical(unify(model))`) + `filings/` (preserved original PDFs, hash-pinned — what
+  `case.json`'s `file` paths point to) + `case-master.pdf` (the whole case reassembled in docket
+  order, lossless) + `pages/<stem>/pNNN.txt` (per-page searchable text) + `lawnlord.duckdb` (the
+  queryable index) + `bundle-manifest.json` cross-linking every image ↔ its pages ↔ its master-PDF
+  page range ↔ its filing. Reading only `case.json` reaches every image; the lossless proof
+  (text + visual) rides inside the bundle; every entry is a relative path (no escapes) and the
+  bundle is regenerable from the intake. Real `combo`: 22 images + 255 searchable pages + 255-page
+  master, text- and visual-lossless. This completes the v0.3.0 milestone (foundation + standard
+  schema + DuckDB + capstone).
+
 - **F4 — re-level the index to the source-true `Image → Document` vocabulary.** The DuckDB index
   now distinguishes an **image** (a filed PDF — Odyssey's own term) from the **documents within it**
   (Motion, Exhibit A, Affidavit…). Tables re-leveled: `documents` → `images`, `document_events` →
