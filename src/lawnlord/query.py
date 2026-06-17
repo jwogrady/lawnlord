@@ -1,9 +1,12 @@
 """Read-only search over the case index, with provenance.
 
-Every result carries enough to cite back to the record — document title, the
-source page number, and the citation string — so an answer can always be traced
-to a page. Pure SELECTs (parameterized); nothing here writes. Results are
-ordered deterministically.
+Every result carries enough to cite back to the record — the image (filed PDF)
+title, the source page number, and the citation string — so an answer can always
+be traced to a page. Pure SELECTs (parameterized); nothing here writes. Results
+are ordered deterministically.
+
+Vocabulary (see :mod:`lawnlord.db`): ``images`` are filed PDFs, ``documents`` are
+the logical documents within an image, and ``chunks`` are pages.
 """
 
 from __future__ import annotations
@@ -19,86 +22,86 @@ def _rows(con: duckdb.DuckDBPyConnection, sql: str, params: list) -> list[dict]:
 
 def search_text(con: duckdb.DuckDBPyConnection, text: str, limit: int = 50) -> list[dict]:
     """Pages whose extracted text contains ``text`` (case-insensitive), each
-    with its document title, source page, and citation."""
+    with its image title, source page, and citation."""
     return _rows(
         con,
         """
-        SELECT c.document_id, d.title AS document_title, c.source_page_number,
+        SELECT c.image_id, i.title AS image_title, c.source_page_number,
                c.citation_display, c.text
         FROM chunks c
-        LEFT JOIN documents d ON d.id = c.document_id
+        LEFT JOIN images i ON i.id = c.image_id
         WHERE lower(c.text) LIKE ?
-        ORDER BY c.document_id, c.source_page_number
+        ORDER BY c.image_id, c.source_page_number
         LIMIT ?
         """,
         ["%" + text.lower() + "%", limit],
     )
 
 
-def needs_review_sections(con: duckdb.DuckDBPyConnection) -> list[dict]:
-    """Sections flagged for human review (low boundary confidence or OCR
-    likely needed), with their page range and why."""
+def needs_review_documents(con: duckdb.DuckDBPyConnection) -> list[dict]:
+    """Documents-within-images flagged for human review (low boundary
+    confidence or OCR likely needed), with their page range and why."""
     return _rows(
         con,
         """
-        SELECT s.document_id, d.title AS document_title, s.section_slug,
-               s.source_page_start, s.source_page_end, s.detection_tier,
-               s.boundary_confidence
-        FROM sections s
-        LEFT JOIN documents d ON d.id = s.document_id
-        WHERE s.needs_review = TRUE
-        ORDER BY s.document_id, s.section_index
+        SELECT d.image_id, i.title AS image_title, d.document_slug,
+               d.source_page_start, d.source_page_end, d.detection_tier,
+               d.boundary_confidence
+        FROM documents d
+        LEFT JOIN images i ON i.id = d.image_id
+        WHERE d.needs_review = TRUE
+        ORDER BY d.image_id, d.document_index
         """,
         [],
     )
 
 
-def documents_by_phase(con: duckdb.DuckDBPyConnection, phase: str) -> list[dict]:
-    """Documents filed in a docket ``phase`` (e.g. "Summary Judgment")."""
+def images_by_phase(con: duckdb.DuckDBPyConnection, phase: str) -> list[dict]:
+    """Images (filed PDFs) filed in a docket ``phase`` (e.g. "Summary Judgment")."""
     return _rows(
         con,
         """
-        SELECT DISTINCT d.id AS document_id, d.title AS document_title,
-               d.filing_date, d.docket_type
-        FROM documents d
-        JOIN document_events de ON de.document_id = d.id
-        JOIN events e ON e.id = de.event_id
+        SELECT DISTINCT i.id AS image_id, i.title AS image_title,
+               i.filing_date, i.docket_type
+        FROM images i
+        JOIN image_events ie ON ie.image_id = i.id
+        JOIN events e ON e.id = ie.event_id
         WHERE e.phase = ?
-        ORDER BY d.id
+        ORDER BY i.id
         """,
         [phase],
     )
 
 
-def documents_by_event(con: duckdb.DuckDBPyConnection, event_type: str) -> list[dict]:
-    """Documents tied to a docket event whose type contains ``event_type``."""
+def images_by_event(con: duckdb.DuckDBPyConnection, event_type: str) -> list[dict]:
+    """Images tied to a docket event whose type contains ``event_type``."""
     return _rows(
         con,
         """
-        SELECT DISTINCT d.id AS document_id, d.title AS document_title,
-               d.filing_date, e.event_type
-        FROM documents d
-        JOIN document_events de ON de.document_id = d.id
-        JOIN events e ON e.id = de.event_id
+        SELECT DISTINCT i.id AS image_id, i.title AS image_title,
+               i.filing_date, e.event_type
+        FROM images i
+        JOIN image_events ie ON ie.image_id = i.id
+        JOIN events e ON e.id = ie.event_id
         WHERE lower(e.event_type) LIKE ?
-        ORDER BY d.id
+        ORDER BY i.id
         """,
         ["%" + event_type.lower() + "%"],
     )
 
 
-def documents_by_party(con: duckdb.DuckDBPyConnection, party: str) -> list[dict]:
-    """Documents tied to docket events naming ``party``."""
+def images_by_party(con: duckdb.DuckDBPyConnection, party: str) -> list[dict]:
+    """Images tied to docket events naming ``party``."""
     return _rows(
         con,
         """
-        SELECT DISTINCT d.id AS document_id, d.title AS document_title,
-               d.filing_date, e.party
-        FROM documents d
-        JOIN document_events de ON de.document_id = d.id
-        JOIN events e ON e.id = de.event_id
+        SELECT DISTINCT i.id AS image_id, i.title AS image_title,
+               i.filing_date, e.party
+        FROM images i
+        JOIN image_events ie ON ie.image_id = i.id
+        JOIN events e ON e.id = ie.event_id
         WHERE lower(e.party) LIKE ?
-        ORDER BY d.id
+        ORDER BY i.id
         """,
         ["%" + party.lower() + "%"],
     )

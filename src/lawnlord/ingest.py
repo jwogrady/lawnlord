@@ -1,10 +1,12 @@
 """Ingest a :class:`~lawnlord.workspace.Case` into the DuckDB index.
 
-Populates the docket tables — ``cases``, ``parties``, ``events``,
-``documents``, ``document_events`` — straight from the curated intake metadata.
-Identity, dates, docket types, and parties come from the JSON; this step never
-guesses and parses no PDF content (it only hashes document bytes so document
-IDs match the exploder's ``doc_<sha16>`` scheme).
+Populates the docket tables — ``cases``, ``parties``, ``events``, ``images``,
+``image_events`` — straight from the curated intake metadata. An **image** is a
+filed PDF (filings.json's ``image``); the documents *within* each image are the
+corpus index step's job (the ``documents`` table). Identity, dates, docket
+types, and parties come from the JSON; this step never guesses and parses no PDF
+content (it only hashes image bytes so image IDs match the exploder's
+``doc_<sha16>`` scheme).
 
 Determinism: every ``created_at`` is the caller-supplied ``generated_at`` (never
 wall-clock), IDs derive from stable inputs, and ingest is drop-and-rebuild for
@@ -41,14 +43,14 @@ def _event_id(case_id: str, date: str, event: str, used: set[str]) -> str:
 
 def _clear_case(con: duckdb.DuckDBPyConnection, case_id: str) -> None:
     """Drop this case's docket rows for a clean rebuild. The database is
-    one-per-case; ``document_events`` (no ``case_id`` of its own) is scoped via
-    this case's documents so a shared DB would not lose another case's links."""
+    one-per-case; ``image_events`` (no ``case_id`` of its own) is scoped via
+    this case's images so a shared DB would not lose another case's links."""
     con.execute(
-        "DELETE FROM document_events WHERE document_id IN "
-        "(SELECT id FROM documents WHERE case_id = ?)",
+        "DELETE FROM image_events WHERE image_id IN "
+        "(SELECT id FROM images WHERE case_id = ?)",
         [case_id],
     )
-    con.execute("DELETE FROM documents WHERE case_id = ?", [case_id])
+    con.execute("DELETE FROM images WHERE case_id = ?", [case_id])
     con.execute("DELETE FROM events WHERE case_id = ?", [case_id])
     con.execute("DELETE FROM parties WHERE case_id = ?", [case_id])
     con.execute("DELETE FROM cases WHERE id = ?", [case_id])
@@ -58,7 +60,7 @@ def ingest_case(con: duckdb.DuckDBPyConnection, case: Case, generated_at: str) -
     """Ingest the docket metadata for ``case``. Returns row counts.
 
     Documents whose source PDF is missing (cannot be hashed) are skipped and
-    reported in the returned ``skipped_documents`` list rather than inserted
+    reported in the returned ``skipped_images`` list rather than inserted
     with a fabricated hash.
     """
     ident = case.identity
@@ -95,7 +97,7 @@ def ingest_case(con: duckdb.DuckDBPyConnection, case: Case, generated_at: str) -
             ],
         )
 
-    # Events: keep id -> files so document_events can be linked after documents.
+    # Events: keep id -> files so image_events can be linked after images.
     used_event_ids: set[str] = set()
     event_files: list[tuple[str, tuple[str, ...]]] = []
     for event in case.events:
@@ -113,9 +115,9 @@ def ingest_case(con: duckdb.DuckDBPyConnection, case: Case, generated_at: str) -
         )
         event_files.append((event_id, event.files))
 
-    # Documents: dedupe by content hash; map intake path -> document id.
-    path_to_doc: dict[str, str] = {}
-    seen_docs: set[str] = set()
+    # Images (filed PDFs): dedupe by content hash; map intake path -> image id.
+    path_to_image: dict[str, str] = {}
+    seen_images: set[str] = set()
     skipped: list[str] = []
     for doc in case.documents:
         pdf_path = case.intake_dir / doc.intake_path
@@ -123,44 +125,44 @@ def ingest_case(con: duckdb.DuckDBPyConnection, case: Case, generated_at: str) -
             skipped.append(doc.intake_path)
             continue
         sha = sha256_file(pdf_path)
-        doc_id = f"doc_{sha[:16]}"
-        path_to_doc[doc.intake_path] = doc_id
-        if doc_id in seen_docs:
-            continue  # same bytes under another path — one document row
-        seen_docs.add(doc_id)
+        image_id = f"doc_{sha[:16]}"
+        path_to_image[doc.intake_path] = image_id
+        if image_id in seen_images:
+            continue  # same bytes under another path — one image row
+        seen_images.add(image_id)
         con.execute(
             """
-            INSERT INTO documents (id, case_id, filename, title, intake_path,
-                                   docket_type, filing_date, declared_page_count,
-                                   actual_page_count, page_count_mismatch,
-                                   sha256_hash, needs_review, created_at)
+            INSERT INTO images (id, case_id, filename, title, intake_path,
+                                docket_type, filing_date, declared_page_count,
+                                actual_page_count, page_count_mismatch,
+                                sha256_hash, needs_review, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, NULL, ?)
             """,
             [
-                doc_id, case_id, doc.filename, doc.title, doc.intake_path,
+                image_id, case_id, doc.filename, doc.title, doc.intake_path,
                 doc.docket_event, doc.filing_date, doc.declared_page_count,
                 sha, generated_at,
             ],
         )
 
-    # Many-to-many: link each event to the documents named in its files[].
+    # Many-to-many: link each event (filing) to the images named in its files[].
     used_links: set[tuple[str, str]] = set()
     for event_id, files in event_files:
         for intake_path in files:
-            doc_id = path_to_doc.get(intake_path)
-            if doc_id is None or (doc_id, event_id) in used_links:
+            image_id = path_to_image.get(intake_path)
+            if image_id is None or (image_id, event_id) in used_links:
                 continue
-            used_links.add((doc_id, event_id))
+            used_links.add((image_id, event_id))
             con.execute(
-                "INSERT INTO document_events (document_id, event_id) VALUES (?, ?)",
-                [doc_id, event_id],
+                "INSERT INTO image_events (image_id, event_id) VALUES (?, ?)",
+                [image_id, event_id],
             )
 
     return {
         "cases": 1,
         "parties": len(case.parties),
         "events": len(event_files),
-        "documents": len(seen_docs),
-        "document_events": len(used_links),
-        "skipped_documents": skipped,
+        "images": len(seen_images),
+        "image_events": len(used_links),
+        "skipped_images": skipped,
     }

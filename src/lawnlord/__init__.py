@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from .analysis_schema import legal_analysis_placeholders, write_json
 from .archive import inspect_archive, inspect_folder, inspect_source, is_suspicious_entry
+from .assemble import assemble_case
 from .canonical import SCHEMA_VERSION as CANONICAL_SCHEMA_VERSION
 from .canonical import from_canonical, to_canonical
 from .pack import pack_case
@@ -112,10 +113,10 @@ from .providers import (
     parse_provider,
 )
 from .query import (
-    documents_by_event,
-    documents_by_party,
-    documents_by_phase,
-    needs_review_sections,
+    images_by_event,
+    images_by_party,
+    images_by_phase,
+    needs_review_documents,
     search_text,
 )
 from .reporting import report_archive, write_boundary_template
