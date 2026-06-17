@@ -1,9 +1,10 @@
 # Lawnlord Project Context
 
-> **Status — vision document.** This describes lawnlord's *target vision and roadmap*, not the
-> shipped release. v0.1.0 implements only the deterministic court-record exploder
-> (archive → submission → document → section → page). See the [README](../README.md) and
-> [CHANGELOG](../CHANGELOG.md) for what exists today.
+> **Status — background vision.** This captures lawnlord's *prime directive and core concepts*. It
+> is not the authoritative plan or status. Through **v0.3.0** the case-record foundation has shipped
+> (exploder, DuckDB index, OCR, full-text search, lossless bundle). For what's shipped see
+> [CHANGELOG](../CHANGELOG.md); for what's planned see [ROADMAP](../ROADMAP.md) (the plan itself is the
+> GitHub issues assigned to each milestone). The commit is always the present.
 
 ## Overview
 
@@ -269,62 +270,6 @@ Every generated statement must be supported by:
 - Facts
 - Legal authority
 - Procedural context
-
----
-
-# Documentation Plan
-
-Create these documents:
-
-docs/
-├── PROJECT.md
-├── CASE_MODEL.md
-├── DATA_MODEL.md
-├── ARCHITECTURE.md
-├── INGESTION.md
-├── AGENTS.md
-└── ROADMAP.md
-
-PROJECT.md
-- Vision
-- Mission
-- Prime Directive
-- UX
-
-CASE_MODEL.md
-- Case lifecycle
-- Artifact model
-- Knowledge Base model
-- Case graph
-
-DATA_MODEL.md
-- DuckDB schema
-- Entity definitions
-- Relationships
-
-ARCHITECTURE.md
-- System architecture
-- Components
-- Data flow
-
-INGESTION.md
-- Intake pipeline
-- OCR
-- Classification
-- Entity extraction
-
-AGENTS.md
-- Intake Agent
-- Research Agent
-- Analysis Agent
-- Strategy Agent
-- Drafting Agent
-- Review Agent
-
-ROADMAP.md
-- MVP
-- v1
-- Future ideas
 
 ---
 
