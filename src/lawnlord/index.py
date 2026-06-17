@@ -62,7 +62,25 @@ def index_corpus(
     except Exception:
         con.execute("ROLLBACK")
         raise
+    # Build the ranked full-text index over page text (outside the txn; a valid
+    # chunk index already committed). Best-effort: if the FTS extension can't
+    # load, search falls back to a substring scan.
+    stats["fts"] = _build_fts_index(con)
     return stats
+
+
+def _build_fts_index(con: duckdb.DuckDBPyConnection) -> bool:
+    """(Re)build the BM25 full-text index over ``chunks.text``. Returns True if
+    built. Non-fatal on failure — query falls back to LIKE."""
+    from .db import load_fts
+
+    if not load_fts(con):
+        return False
+    try:
+        con.execute("PRAGMA create_fts_index('chunks', 'id', 'text', overwrite=1)")
+        return True
+    except Exception:
+        return False
 
 
 def _index_documents(
