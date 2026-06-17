@@ -52,7 +52,13 @@ function reviewedCount(): number {
 	return data.pages.filter((p) => p.review?.reviewed).length;
 }
 
-type DocGroup = { doc: Doc; first: number; total: number; reviewed: number };
+type DocGroup = {
+	doc: Doc;
+	first: number;
+	total: number;
+	reviewed: number;
+	idxs: number[];
+};
 
 function docGroups(): DocGroup[] {
 	const out: DocGroup[] = [];
@@ -60,10 +66,11 @@ function docGroups(): DocGroup[] {
 	data.pages.forEach((p, i) => {
 		if (!at.has(p.document.id)) {
 			at.set(p.document.id, out.length);
-			out.push({ doc: p.document, first: i, total: 0, reviewed: 0 });
+			out.push({ doc: p.document, first: i, total: 0, reviewed: 0, idxs: [] });
 		}
 		const g = out[at.get(p.document.id) as number];
 		g.total++;
+		g.idxs.push(i);
 		if (p.review?.reviewed) g.reviewed++;
 	});
 	return out;
@@ -82,9 +89,13 @@ function render(): void {
 	const rating = p.review ? p.review.rating : myScore; // default to lawnlord's
 	progressEl.textContent = `${reviewedCount()} / ${data.pages.length} reviewed · ${data.case}`;
 
+	// The left rail is the case's table of contents: every filed document in
+	// docket order, the current one expanded into its pages so you can jump to
+	// any page and see its review status at a glance.
 	const sidebar = docGroups()
-		.map((g) => {
-			const cur = g.doc.id === p.document.id ? " cur" : "";
+		.map((g, n) => {
+			const isCur = g.doc.id === p.document.id;
+			const cur = isCur ? " cur" : "";
 			const done = g.reviewed === g.total ? " done" : "";
 			const fam = g.doc.family
 				? `<span class="fam">${esc(g.doc.family)}</span>`
@@ -92,10 +103,27 @@ function render(): void {
 			const range = g.doc.pageStart
 				? `p.${g.doc.pageStart}–${g.doc.pageEnd}`
 				: "";
+			const pages = isCur
+				? `<div class="pages">${g.idxs
+						.map((gi) => {
+							const pp = data.pages[gi];
+							const st =
+								gi === idx
+									? " cur"
+									: pp.review?.flag
+										? " flag"
+										: pp.review?.reviewed
+											? " done"
+											: "";
+							const mk = pp.review?.flag ? "⚑" : pp.review?.reviewed ? "✓" : "";
+							return `<button class="pageitem${st}" data-idx="${gi}">p.${pp.page}<span class="mk">${mk}</span></button>`;
+						})
+						.join("")}</div>`
+				: "";
 			return `<button class="docitem${cur}${done}" data-first="${g.first}">
-        <span class="doctitle">${esc(g.doc.title)}</span>
+        <span class="doctitle"><span class="docn">${n + 1}.</span> ${esc(g.doc.title)}</span>
         <span class="docmeta">${fam}${range} · ${g.reviewed}/${g.total}</span>
-      </button>`;
+      </button>${pages}`;
 		})
 		.join("");
 
@@ -104,7 +132,7 @@ function render(): void {
 		: "";
 	app.innerHTML = `
     <aside class="docs">
-      <div class="docs-h">Documents &amp; exhibits</div>
+      <div class="docs-h">Case contents — ${esc(data.case)}</div>
       ${sidebar}
     </aside>
     <section class="pane">
@@ -152,6 +180,13 @@ function wire(p: Page, myScore: number): void {
 			render();
 		};
 	}
+	for (const el of document.querySelectorAll(".pageitem")) {
+		(el as HTMLButtonElement).onclick = () => {
+			idx = Number((el as HTMLElement).dataset.idx);
+			render();
+		};
+	}
+	document.querySelector(".pageitem.cur")?.scrollIntoView({ block: "nearest" });
 	(document.getElementById("prev") as HTMLButtonElement).onclick = () => {
 		if (idx > 0) idx--;
 		render();
