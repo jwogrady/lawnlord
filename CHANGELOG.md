@@ -19,8 +19,6 @@ intake, and the DuckDB `case → event → document → section → page` index 
 
 ### Changed
 
-- README reframed as the project front door: honest v0.1.0 scope plus the case-understanding
-  direction and provider-based intake (Odyssey).
 - `pyproject.toml` metadata: refreshed description, added keywords, trove classifiers, and project
   URLs.
 

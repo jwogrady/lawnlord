@@ -1,45 +1,19 @@
 # lawnlord
 
-Turn a **legal court-record export** into a structured, citation-preserving, machine-readable case
-dataset — and build toward a local-first engine that helps you *understand* a case, not just store
-its files.
-
-Every document is decomposed and traceable back to its original source page, so downstream legal
-work (docket navigation, provenance, evidence mining, timeline reconstruction, filing generation)
-rests on a trustworthy substrate. This is **not** a generic PDF splitter; it is legal-record
-normalization.
-
-> **Status (v0.1.0):** ships the deterministic **document exploder** described below — one PDF →
-> Section → Page artifacts with full provenance. The case-workspace model, structured intake of
-> court-portal exports (e.g. Odyssey), and the DuckDB index that ties together
-> **case → event → document → section → page** are the active roadmap, not yet shipped. See
-> [`docs/ROADMAP.md`](docs/ROADMAP.md) for the plan and [`CHANGELOG.md`](CHANGELOG.md) for what's
-> released.
-
-## What it does today (v0.1.0)
-
-Given a source PDF (or a ZIP of court PDFs), lawnlord explodes each document into a five-level
-corpus —
+Turn a downloaded **legal court-record packet** (one ZIP of court PDFs) into a structured,
+citation-preserving, machine-readable case dataset — a five-level model:
 
 ```
 archive → submission → document → section → page
 ```
 
-— writing section PDFs, per-page PDFs, extracted per-page text, per-page analysis stubs, section
-metadata, a document `toc.json`, and a top-level `manifest.json`. Every page carries the citable
-`sourcePageNumber` and a citation string, so nothing loses its provenance.
+Every unit is traceable back to its original source PDF page, so downstream legal work
+(docket navigation, provenance, evidence mining, timeline reconstruction, filing generation)
+is built on a trustworthy substrate. This is **not** a generic PDF splitter; it is
+legal-record normalization.
 
 > **Status:** standalone, installable tool with an intake-folder workflow. Inputs and output
 > are resolved from an intake the consumer project supplies — not a hardcoded layout.
-
-## Where it's going
-
-The source of truth is an **intake folder organized by provider** (the first is `ody` = **Odyssey**,
-`odyssey.mctx.org`): authoritative case/docket/document metadata (JSON) alongside the source PDFs.
-The target model is **case → event → document → section → page**, with curated docket metadata
-(parties, filing dates, document types, disposition) layered onto immutable documents and indexed in
-a local DuckDB for query, analysis, and (eventually) drafting. Full plan:
-[`docs/ROADMAP.md`](docs/ROADMAP.md); vision: [`docs/`](docs/).
 
 ## Install
 
@@ -140,6 +114,6 @@ model, unfilled page-analysis stub) that must hold for any input.
 
 ## Roadmap
 
-See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the phased plan — v0.1.0 (shipped) through the
-case-workspace, Odyssey intake, and DuckDB-index milestone and beyond. The deeper vision (entity
-graph, analysis, strategy, drafting) lives in [`docs/`](docs/).
+- Richer `lawnlord.toml` (per-run options, naming conventions).
+- Docket-aware submission grouping (multiple PDFs per submission) instead of one-PDF-per-submission.
+- Optional packaging of the generated corpus for downstream consumers.
