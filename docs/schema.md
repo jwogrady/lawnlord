@@ -47,8 +47,25 @@ A derived, regenerable index over the same record plus the exploded corpus. Tabl
 `documents`, `chunks` (one row per page; FTS over `text`), and the `knowledge_documents` stub. Read
 `db.py` `_SCHEMA_STATEMENTS` for exact columns.
 
-## Below the image (future — ROADMAP)
+## Below the image: the `document` level — `section == document` (decision, #34)
 
-The image (a filed PDF) is the court-defined leaf. Decomposing it into documents-within and pages
-with per-page text + image pointers, plus confidence scored against both sources, is the v0.4.0 work
-in the [ROADMAP](../ROADMAP.md). It is additive and never alters the mirrored record above.
+The image is the court-defined leaf. lawnlord decomposes it into the **documents within an image** —
+the logical filings the exploder detects from bookmarks/headings (a Motion, Exhibit A, an Affidavit).
+This is **one** boundary level, not two: the exploder's on-disk vocabulary calls these boundaries
+"sections," but they are the same thing as the index's `documents`. **`section == document`** — there
+is no separate first-class `section` level, because the data has no sub-document level to model.
+
+- The DuckDB index stores them in `documents` (there is no `sections` table); `chunks` link to
+  `document_id`.
+- The on-disk corpus keeps its `sections/` grouping as an implementation detail, mapped to a
+  `documents` row at the index boundary (`index.py`).
+- **Junk bookmarks are excluded** from the document set: embedded-file/remote targets (page `< 1`),
+  non-top-level (level ≠ 1) entries, and — for the reassembled outline — filename-like or
+  bare-numeric titles (`boundaries.py`, `assemble._is_junk_bookmark`).
+
+Reviving `section` as its own level is deferred unless a real sub-document structure appears; today it
+would be an empty level.
+
+The remaining below-the-image work — per-page text + preserved-image pointers and confidence scored
+against both sources — is the rest of the v0.4.0 chain in the [ROADMAP](../ROADMAP.md). It is additive
+and never alters the mirrored record above.
