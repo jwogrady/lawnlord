@@ -47,5 +47,7 @@ def test_emit_compare_renders_pages_scores_and_json(tmp_path):
         assert (out / p["reconstructed"].lstrip("/")).exists()
         assert 0.0 <= p["score"] <= 1.0
         assert p["note"]
+        # each page knows its document/exhibit (#69) so the reviewer groups by it
+        assert p["document"]["id"] and p["document"]["title"]
     # native text + declared(2)==actual(2) + docketed -> full confidence
     assert data["pages"][0]["score"] == 1.0
