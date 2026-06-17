@@ -17,9 +17,10 @@ the case clearly.
 
 ## The solution
 
-Lawnlord turns that pile into a case you can understand and act on. It mirrors the court's filed
-record exactly, extracts every page to searchable text, and proves the result is lossless — so
-nothing is missed and everything traces back to a real source page. On that trustworthy record it
+Lawnlord ingests your case's filings and **sorts them into the schema you need to analyze the case
+and fight it** — case → parties/events → filed images → the documents and exhibits within them. It
+mirrors the court's filed record exactly, extracts every page to searchable text, and proves the
+result is lossless — so nothing is missed and everything traces back to a real source page. On that trustworthy record it
 helps you answer the questions that decide the case:
 
 **What happened? · What can be proven? · What law applies? · What should be done next?**
