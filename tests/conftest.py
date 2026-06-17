@@ -146,3 +146,85 @@ def ody_intake(tmp_path):
     for pdf in ("Final_Judgment.pdf", "Petition.pdf", "Motion.pdf", "Citation.pdf"):
         (filings / pdf).write_bytes(f"%PDF-1.4 {pdf}".encode("utf-8"))
     return intake
+
+
+# case-history with the Odyssey financial summary added (combo lifts this).
+_CASE_HISTORY_WITH_MONEY = {
+    **_CASE_HISTORY,
+    "financialInformation": {
+        "party": "Plaintiff - Acme Association",
+        "totalFinancialAssessment": "366",
+        "totalPaymentsAndCredits": "366",
+        # Integer 0 (as the real export emits) — guards the falsy-zero bug.
+        "balanceDueAsOf": {"date": "2025-06-16", "amount": 0},
+    },
+}
+
+# A re:SearchTX (meta.json) export for the same hermetic case: attorney bar
+# numbers, a hearings table with a result, and a docket whose comments and
+# page counts are richer than the Odyssey timeline. Document names are spelled
+# to resolve back to the filings (e.g. "Final Judgment.pdf" -> Final_Judgment.pdf).
+_RESEARCH_META = {
+    "_meta": {"source": "re:SearchTX"},
+    "caseInformation": {"caseNumber": "99-00-12345", "judge": "Justice, Jane"},
+    "parties": {
+        "rows": [
+            {
+                "type": "Plaintiff",
+                "name": "Acme Association",
+                "attorneys": [{"name": "Pat Counsel", "attorneyNumber": "24000001"}],
+            },
+            {"type": "Defendant", "name": "John Doe", "attorneys": []},
+        ]
+    },
+    "hearings": {
+        "rows": [
+            {
+                "dateTime": "6/15/2025 09:00 AM",
+                "hearingType": "Bench Trial",
+                "judge": "Justice, Jane",
+                "location": "1st Courtroom",
+                "result": "Canceled - Case Disposed",
+            }
+        ]
+    },
+    "events": {
+        "rows": [
+            {
+                "date": "6/1/2025",
+                "event": "Filing",
+                "type": "Summary Judgment",
+                "comments": "MSJ granted traditional -- denied no evidence 6/1/25",
+                "documents": [{"name": "Final Judgment.pdf", "pages": 4}],
+            },
+            {
+                "date": "5/29/2025",
+                "event": "Filing",
+                "type": "Docket Entry",
+                "comments": "set for submission 5/29/25",
+                "documents": [],
+            },
+        ]
+    },
+}
+
+
+@pytest.fixture
+def combo_intake(tmp_path):
+    """Create a hermetic reconciled ``combo`` intake: the Odyssey JSONs (with
+    the financial summary) plus a re:SearchTX ``meta.json``, in a folder named
+    ``combo`` so the selector resolves the merge adapter."""
+    intake = tmp_path / "combo"
+    filings = intake / "filings"
+    filings.mkdir(parents=True)
+    for name, payload in (
+        ("case-summary.json", _CASE_SUMMARY),
+        ("case-history.json", _CASE_HISTORY_WITH_MONEY),
+        ("register-of-actions.json", _REGISTER_OF_ACTIONS),
+        ("filings.json", _FILINGS),
+        ("meta.json", _RESEARCH_META),
+    ):
+        (intake / name).write_text(json.dumps(payload), encoding="utf-8")
+    for pdf in ("Final_Judgment.pdf", "Petition.pdf", "Motion.pdf", "Citation.pdf"):
+        (filings / pdf).write_bytes(f"%PDF-1.4 {pdf}".encode("utf-8"))
+    return intake

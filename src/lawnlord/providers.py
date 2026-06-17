@@ -15,15 +15,19 @@ four metadata JSON files plus a ``filings/`` folder of source PDFs:
 This layer does no I/O beyond reading those files, mints no IDs, and never
 guesses: fields come straight from the curated JSON. Output is deterministic
 (stable ordering) so callers can rely on it as a pure function of the folder.
-The full cross-source docket reconciliation (timeline + register-of-actions +
-filings.json) is deferred to the DuckDB ingest milestone; here the authoritative
-event spine is ``case-history.timeline`` (the richest, phase-tagged source).
+
+A reconciled ``combo`` folder additionally holds a re:SearchTX ``meta.json``;
+its adapter (``parse_combo``) merges that in — attorney bar numbers, a hearings
+table, the financial summary, and a docket of the registrar/judge's comments —
+on top of the Odyssey base. The Odyssey ``case-history.timeline`` remains the
+phase-tagged event spine; the merged ``docket`` is the richer parallel view.
 """
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from slugify import slugify
@@ -34,15 +38,28 @@ CASE_HISTORY_FILENAME = "case-history.json"
 REGISTER_OF_ACTIONS_FILENAME = "register-of-actions.json"
 FILINGS_FILENAME = "filings.json"
 FILINGS_DIRNAME = "filings"
+# re:SearchTX (research.txcourts.gov) export, present in a reconciled `combo`
+# folder alongside the Odyssey JSONs. Adds hearings, attorney bar numbers, and
+# a docket with the judge's comments + per-document page counts.
+RESEARCH_META_FILENAME = "meta.json"
+
+
+def _norm(text: str) -> str:
+    """Lowercase alphanumeric-only key for tolerant name/title matching."""
+    return re.sub(r"[^a-z0-9]", "", (text or "").lower())
 
 
 @dataclass(frozen=True)
 class Attorney:
-    """An attorney of record for a party."""
+    """An attorney of record for a party.
+
+    ``number`` is the State Bar of Texas attorney number, available from the
+    re:SearchTX export (merged in for a ``combo`` intake)."""
 
     name: str
     status: str = ""
     phone: str = ""
+    number: str = ""
 
 
 @dataclass(frozen=True)
@@ -85,6 +102,52 @@ class DocumentRef:
 
 
 @dataclass(frozen=True)
+class Hearing:
+    """A scheduled hearing (from the re:SearchTX hearings table). ``result``
+    records the outcome, e.g. "Canceled - Case Disposed"."""
+
+    date_time: str
+    hearing_type: str = ""
+    judge: str = ""
+    location: str = ""
+    result: str = ""
+
+
+@dataclass(frozen=True)
+class Financials:
+    """Money assessed/paid on the case (from the Odyssey financial summary)."""
+
+    party: str = ""
+    total_assessment: str = ""
+    total_payments: str = ""
+    balance_due: str = ""
+    balance_as_of: str = ""
+
+
+@dataclass(frozen=True)
+class DocketDocument:
+    """A document named on a docket entry. ``intake_path`` is joined from the
+    file index when the name resolves to a known source PDF, else ""."""
+
+    name: str
+    declared_page_count: int | None = None
+    intake_path: str = ""
+
+
+@dataclass(frozen=True)
+class DocketEntry:
+    """One row of the re:SearchTX docket — the richest event source, carrying
+    the registrar/judge's free-text comment (e.g. the grant/deny note) and
+    per-document page counts, including pure docket entries with no document."""
+
+    date: str
+    event: str = ""
+    type: str = ""
+    comment: str = ""
+    documents: tuple[DocketDocument, ...] = ()
+
+
+@dataclass(frozen=True)
 class CaseIdentity:
     """The case header, combined from case-summary + case-history."""
 
@@ -102,13 +165,24 @@ class CaseIdentity:
 
 @dataclass(frozen=True)
 class CaseModel:
-    """The parsed, in-memory model of one case from a provider folder."""
+    """The parsed, in-memory model of one case from a provider folder.
+
+    ``events`` is the phase-ordered Odyssey timeline (the navigational spine).
+    ``hearings``, ``financials``, and ``docket`` are populated only for a
+    reconciled ``combo`` intake, which merges the re:SearchTX export: hearings
+    (with results), the money summary, and the richer docket (free-text
+    comments + page counts) whose document names are linked back to the file
+    index. Attorney bar ``number``s are likewise merged onto ``parties``.
+    """
 
     provider: str
     identity: CaseIdentity
     parties: tuple[Party, ...] = ()
     events: tuple[Event, ...] = ()
     documents: tuple[DocumentRef, ...] = ()
+    hearings: tuple[Hearing, ...] = ()
+    financials: Financials | None = None
+    docket: tuple[DocketEntry, ...] = ()
 
 
 def _load_json(path: Path) -> dict:
@@ -238,16 +312,152 @@ def parse_odyssey(intake_dir: str | Path) -> CaseModel:
     )
 
 
+def _meta_table_rows(meta: dict, key: str) -> list:
+    """Rows of a re:SearchTX section that is shaped {columns, rows: [...]}."""
+    section = meta.get(key)
+    if not isinstance(section, dict):
+        return []
+    rows = section.get("rows")
+    return rows if isinstance(rows, list) else []
+
+
+def _parse_hearings(meta: dict) -> tuple[Hearing, ...]:
+    return tuple(
+        Hearing(
+            date_time=r.get("dateTime", ""),
+            hearing_type=r.get("hearingType", ""),
+            judge=r.get("judge", "") or "",
+            location=r.get("location", "") or "",
+            result=r.get("result", "") or "",
+        )
+        for r in _meta_table_rows(meta, "hearings")
+        if isinstance(r, dict)
+    )
+
+
+def _parse_financials(history: dict) -> Financials | None:
+    """Money summary from the Odyssey financialInformation block (case-history,
+    falling back to register-of-actions). None when absent."""
+    fi = history.get("financialInformation")
+    if not isinstance(fi, dict):
+        return None
+    balance = fi.get("balanceDueAsOf") or {}
+
+    def s(value) -> str:
+        # Stringify, but keep falsy-but-valid values like 0; None/absent -> "".
+        return "" if value is None else str(value)
+
+    return Financials(
+        party=fi.get("party", ""),
+        total_assessment=s(fi.get("totalFinancialAssessment")),
+        total_payments=s(fi.get("totalPaymentsAndCredits")),
+        balance_due=s(balance.get("amount")),
+        balance_as_of=s(balance.get("date")),
+    )
+
+
+def _attorney_numbers(meta: dict) -> dict[str, str]:
+    """Map normalized attorney name -> State Bar number, from meta.json parties."""
+    numbers: dict[str, str] = {}
+    for party in _meta_table_rows(meta, "parties"):
+        for att in (party.get("attorneys") or []) if isinstance(party, dict) else []:
+            if isinstance(att, dict) and att.get("name"):
+                numbers[_norm(att["name"])] = att.get("attorneyNumber", "") or ""
+    return numbers
+
+
+def _enrich_attorney_numbers(
+    parties: tuple[Party, ...], meta: dict
+) -> tuple[Party, ...]:
+    numbers = _attorney_numbers(meta)
+    if not numbers:
+        return parties
+    return tuple(
+        replace(
+            party,
+            attorneys=tuple(
+                replace(att, number=numbers.get(_norm(att.name), att.number))
+                for att in party.attorneys
+            ),
+        )
+        for party in parties
+    )
+
+
+def _parse_docket(meta: dict, documents: tuple[DocumentRef, ...]) -> tuple[DocketEntry, ...]:
+    """The re:SearchTX events table as docket entries, linking each named
+    document back to a source PDF (by normalized filename, prefix-tolerant)."""
+    by_key = {_norm(Path(d.filename).stem): d.intake_path for d in documents}
+
+    def link(name: str) -> str:
+        key = _norm(Path(name).stem)
+        if key in by_key:
+            return by_key[key]
+        for other, path in by_key.items():
+            if key[:24] == other[:24] or key.startswith(other[:22]) or other.startswith(key[:22]):
+                return path
+        return ""
+
+    entries: list[DocketEntry] = []
+    for row in _meta_table_rows(meta, "events"):
+        if not isinstance(row, dict):
+            continue
+        docs = tuple(
+            DocketDocument(
+                name=dd.get("name", ""),
+                declared_page_count=dd.get("pages") if isinstance(dd.get("pages"), int) else None,
+                intake_path=link(dd.get("name", "")),
+            )
+            for dd in (row.get("documents") or [])
+            if isinstance(dd, dict)
+        )
+        entries.append(
+            DocketEntry(
+                date=row.get("date", ""),
+                event=row.get("event", ""),
+                type=row.get("type", ""),
+                comment=row.get("comments", "") or "",
+                documents=docs,
+            )
+        )
+    return tuple(entries)
+
+
+def parse_combo(intake_dir: str | Path) -> CaseModel:
+    """Parse a reconciled ``combo`` intake: the Odyssey export merged with the
+    re:SearchTX ``meta.json`` so the model carries the best of both portals.
+
+    Odyssey is the base (identity, parties, the phase-tagged event timeline,
+    and the file-linked document set). From ody we also lift ``financials``.
+    From re:SearchTX we merge attorney bar numbers onto parties, the
+    ``hearings`` table (with results), and the richer ``docket`` (the judge's
+    comments + per-document page counts), linking docket document names back to
+    the source PDFs. With no meta.json present this degrades to parse_odyssey
+    plus financials.
+    """
+    intake_dir = Path(intake_dir)
+    base = parse_odyssey(intake_dir)
+    meta = _load_json(intake_dir / RESEARCH_META_FILENAME)
+    history = _load_json(intake_dir / CASE_HISTORY_FILENAME)
+    register = _load_json(intake_dir / REGISTER_OF_ACTIONS_FILENAME)
+
+    return replace(
+        base,
+        parties=_enrich_attorney_numbers(base.parties, meta),
+        hearings=_parse_hearings(meta),
+        financials=_parse_financials(history) or _parse_financials(register),
+        docket=_parse_docket(meta, base.documents),
+    )
+
+
 # Provider folder name -> adapter. Aliases keep the selector forgiving.
-# ``combo`` is a reconciled best-of-both intake (the recommended source of
-# truth): it is Odyssey-shaped — it carries the four Odyssey JSONs plus the
-# full document set — so it parses with the Odyssey adapter. Any extra
-# reference metadata it may also hold (e.g. a re:SearchTX meta.json) is left to
-# the deferred cross-source reconciliation milestone.
+# ``combo`` is the reconciled best-of-both intake (the recommended source of
+# truth): the Odyssey export plus the re:SearchTX meta.json, merged by
+# parse_combo so the model uses the best data from both portals.
 PROVIDERS = {
     "ody": parse_odyssey,
     "odyssey": parse_odyssey,
-    "combo": parse_odyssey,
+    "combo": parse_combo,
 }
 
 
