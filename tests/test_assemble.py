@@ -75,6 +75,19 @@ def test_roundtrip_is_text_lossless(tmp_path):
     assert stats["missing"] == []
 
 
+def test_roundtrip_is_visually_lossless_and_accounts_extras(tmp_path):
+    _, _, stats = _assemble(tmp_path)
+    # Visual fidelity (numpy is available in the dev env): pages render the same.
+    assert stats["visual_lossless"] is True
+    assert stats["visual_worst_diff"] <= 2.0
+    # Nothing silently lost: attachments carried and annotations preserved.
+    assert stats["embedded_source"] == 0
+    assert stats["embedded_attachments"] == stats["embedded_source"]
+    assert stats["embedded_lossless"] is True
+    assert stats["annotations_master"] == stats["annotations_source"]
+    assert stats["annotations_lossless"] is True
+
+
 def test_outline_is_filing_image_document(tmp_path):
     _, out, _ = _assemble(tmp_path)
     manifest = json.loads(out.with_suffix(".manifest.json").read_text())
