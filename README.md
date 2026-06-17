@@ -96,7 +96,7 @@ behavior change to approve by hand, not to silently update.
 Background and reference (each linked here, the canonical entry point):
 
 - [`docs/standard-schema.md`](docs/standard-schema.md) — the standard court-record schema (the mirrored "what is", down to the image).
-- [`docs/context.md`](docs/context.md) — prime directive and core concepts (background vision).
+- [`docs/context.md`](docs/context.md) — why lawnlord exists (problem & solution) and how you use it and benefit.
 - [`docs/architecture.md`](docs/architecture.md) — target architecture (background vision).
 - [`docs/ux.md`](docs/ux.md) — product north star (experience principles).
 
