@@ -66,31 +66,31 @@ def test_search_text_returns_provenance(tmp_path):
     rows = main.search_text(con, "summary judgment")
     assert len(rows) == 1
     r = rows[0]
-    assert r["document_title"] == "Motion"
+    assert r["image_title"] == "Motion"
     assert r["source_page_number"] == 1
     assert r["citation_display"]  # non-empty citation
     # Petition does not match.
     assert main.search_text(con, "no-such-text") == []
 
 
-def test_needs_review_sections(tmp_path):
+def test_needs_review_documents(tmp_path):
     case = _build_index(tmp_path)
     con = _ro(case)
-    rows = main.needs_review_sections(con)
-    # Single-page docs fall back to a whole-doc section (confidence 0.5 < 0.9).
+    rows = main.needs_review_documents(con)
+    # Single-page images fall back to a whole-image document (0.5 < 0.9).
     assert len(rows) >= 1
     assert all(r["boundary_confidence"] < 0.9 for r in rows)
 
 
-def test_documents_by_phase_and_event_and_party(tmp_path):
+def test_images_by_phase_and_event_and_party(tmp_path):
     case = _build_index(tmp_path)
     con = _ro(case)
-    phase = main.documents_by_phase(con, "Summary Judgment")
-    assert [r["document_title"] for r in phase] == ["Motion"]
-    event = main.documents_by_event(con, "petition")
-    assert [r["document_title"] for r in event] == ["Petition"]
-    party = main.documents_by_party(con, "Doe")
-    assert [r["document_title"] for r in party] == ["Petition"]
+    phase = main.images_by_phase(con, "Summary Judgment")
+    assert [r["image_title"] for r in phase] == ["Motion"]
+    event = main.images_by_event(con, "petition")
+    assert [r["image_title"] for r in event] == ["Petition"]
+    party = main.images_by_party(con, "Doe")
+    assert [r["image_title"] for r in party] == ["Petition"]
 
 
 def test_read_only_open_requires_existing_db(tmp_path):

@@ -67,9 +67,9 @@ def _index(tmp_path):
 def test_index_counts(tmp_path):
     case, con, stats = _index(tmp_path)
     assert stats["chunks"] == 3  # 2 + 1 pages
-    assert stats["sections"] >= 2
+    assert stats["documents"] >= 2
     assert con.execute("SELECT count(*) FROM chunks").fetchone()[0] == 3
-    assert con.execute("SELECT count(*) FROM sections").fetchone()[0] == stats["sections"]
+    assert con.execute("SELECT count(*) FROM documents").fetchone()[0] == stats["documents"]
 
 
 def test_chunks_have_provenance(tmp_path):
@@ -86,12 +86,12 @@ def test_declared_vs_actual_cross_check(tmp_path):
     # Motion declared 99 but is 1 page -> flagged; Petition (2==2) -> not.
     assert any(m["actual"] == 1 and m["declared"] == 99 for m in stats["mismatches"])
     motion = con.execute(
-        "SELECT actual_page_count, page_count_mismatch FROM documents "
+        "SELECT actual_page_count, page_count_mismatch FROM images "
         "WHERE filename = 'Motion.pdf'"
     ).fetchone()
     assert motion == (1, True)
     petition = con.execute(
-        "SELECT actual_page_count, page_count_mismatch FROM documents "
+        "SELECT actual_page_count, page_count_mismatch FROM images "
         "WHERE filename = 'Petition.pdf'"
     ).fetchone()
     assert petition == (2, False)
@@ -103,7 +103,7 @@ def test_reindex_is_deterministic(tmp_path):
     def dump():
         return {
             t: con.execute(f"SELECT * FROM {t} ORDER BY ALL").fetchall()
-            for t in ("sections", "chunks")
+            for t in ("documents", "chunks")
         }
 
     first = dump()
@@ -154,7 +154,7 @@ def test_undocketed_document_is_counted_not_hidden(tmp_path):
     main.apply_schema(con)
     main.ingest_case(con, case, manifest["generatedAt"])
     stats = main.index_corpus(con, case, case.corpus_dir, manifest["generatedAt"])
-    assert stats["orphan_documents"] == 2  # both PDFs undocketed
+    assert stats["orphan_images"] == 2  # both PDFs undocketed
     assert stats["chunks"] == 3  # still indexed
 
 
@@ -172,4 +172,4 @@ def test_index_cli_end_to_end(tmp_path):
     cli.main(["index", str(folder), "--case-dir", str(out)])
     con = main.open_case_db(out / "lawnlord.duckdb")
     assert con.execute("SELECT count(*) FROM chunks").fetchone()[0] == 3
-    assert con.execute("SELECT count(*) FROM documents").fetchone()[0] == 2
+    assert con.execute("SELECT count(*) FROM images").fetchone()[0] == 2

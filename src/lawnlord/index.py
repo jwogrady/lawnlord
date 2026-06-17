@@ -1,11 +1,15 @@
-"""Index the exploded corpus into DuckDB: ``sections`` + page ``chunks``.
+"""Index the exploded corpus into DuckDB: ``documents`` + page ``chunks``.
 
-Driven by the corpus ``manifest.json`` and each document's ``toc.json`` (the
-authoritative page enumeration — never globs the filesystem). Inserts one
-``sections`` row per detected section and one ``chunks`` row per page, links them
-to the already-ingested ``documents`` row by ``documentId`` (``doc_<sha16>``),
+Driven by the corpus ``manifest.json`` and each image's ``toc.json`` (the
+authoritative page enumeration — never globs the filesystem). Each detected
+boundary *section* on disk is a **document within the image**: this step inserts
+one ``documents`` row per detected document and one ``chunks`` row per page,
+links them to the already-ingested ``images`` row by image id (``doc_<sha16>``),
 and cross-checks the exploder's actual page count against the declared
 ``filings.json`` ``pageCount`` (flagging mismatches, not trusting blindly).
+
+(The on-disk corpus still names these boundaries "sections" — that exploder
+vocabulary is mapped to ``documents`` here, at the index boundary.)
 
 Determinism: row timestamps come from the corpus ``generatedAt``, so re-indexing
 the same corpus is byte-identical. An integrity guard (run before any insert)
@@ -34,9 +38,9 @@ def index_corpus(
     generated_at: str | None = None,
 ) -> dict:
     """Index the exploded corpus under ``corpus_dir`` (default: the case's
-    corpus dir) into the sections/chunks tables. Returns row counts, any
+    corpus dir) into the documents/chunks tables. Returns row counts, any
     declared-vs-actual page-count mismatches, and the count of un-docketed
-    documents. Raises on a missing manifest or a broken page-coverage invariant
+    images. Raises on a missing manifest or a broken page-coverage invariant
     (rolling back so the prior index survives)."""
     corpus_dir = Path(corpus_dir) if corpus_dir else case.corpus_dir
     manifest_path = corpus_dir / "manifest.json"
@@ -52,7 +56,7 @@ def index_corpus(
     try:
         # Drop-and-rebuild this case's corpus rows (idempotent re-index).
         con.execute("DELETE FROM chunks WHERE case_id = ?", [case_id])
-        con.execute("DELETE FROM sections WHERE case_id = ?", [case_id])
+        con.execute("DELETE FROM documents WHERE case_id = ?", [case_id])
         stats = _index_documents(con, manifest, corpus_dir, case_id, generated_at)
         con.execute("COMMIT")
     except Exception:
@@ -68,94 +72,95 @@ def _index_documents(
     case_id: str,
     generated_at: str,
 ) -> dict:
-    """Insert sections/chunks for every document in the manifest (inside the
-    caller's transaction). Raises ValueError on broken page coverage."""
-    sections_n = 0
+    """Insert documents/chunks for every image in the manifest (inside the
+    caller's transaction). Each on-disk boundary "section" becomes a document
+    within its image. Raises ValueError on broken page coverage."""
+    documents_n = 0
     chunks_n = 0
-    docs_indexed = 0
-    orphan_documents = 0
+    images_indexed = 0
+    orphan_images = 0
     mismatches: list[dict] = []
 
     for submission in manifest.get("submissions", []):
-        for doc in submission.get("documents", []):
-            document_id = doc["documentId"]
-            doc_dir = (corpus_dir / doc["metadataPath"]).parent
+        for image in submission.get("documents", []):
+            image_id = image["documentId"]
+            doc_dir = (corpus_dir / image["metadataPath"]).parent
             toc = _load(doc_dir / "toc.json")
             actual_pages = toc.get("pageCount", 0)
-            toc_sections = toc.get("sections", [])
+            toc_documents = toc.get("sections", [])
 
             # Integrity guard runs BEFORE any insert: a corrupt corpus fails
             # with a clear error (not a cryptic PK collision) and writes nothing.
             seen_pages = [
                 pg["sourcePageNumber"]
-                for sec in toc_sections
-                for pg in sec.get("pages", [])
+                for doc in toc_documents
+                for pg in doc.get("pages", [])
             ]
-            section_page_sum = sum(sec.get("pageCount", 0) for sec in toc_sections)
+            document_page_sum = sum(doc.get("pageCount", 0) for doc in toc_documents)
             if sorted(seen_pages) != list(range(1, actual_pages + 1)):
                 raise ValueError(
-                    f"page coverage broken for {document_id}: "
+                    f"page coverage broken for {image_id}: "
                     f"{sorted(seen_pages)} != 1..{actual_pages}"
                 )
-            if section_page_sum != actual_pages:
+            if document_page_sum != actual_pages:
                 raise ValueError(
-                    f"section page sum {section_page_sum} != actual "
-                    f"{actual_pages} for {document_id}"
+                    f"document page sum {document_page_sum} != actual "
+                    f"{actual_pages} for {image_id}"
                 )
 
             # Cross-check declared (filings.json) vs actual (exploder) page count.
             row = con.execute(
-                "SELECT declared_page_count FROM documents WHERE id = ?",
-                [document_id],
+                "SELECT declared_page_count FROM images WHERE id = ?",
+                [image_id],
             ).fetchone()
             if row is None:
                 # In the corpus but not docketed in filings.json — index its
                 # pages but surface it rather than silently creating orphans.
-                orphan_documents += 1
+                orphan_images += 1
             else:
                 declared = row[0]
                 mismatch = declared is not None and declared != actual_pages
                 con.execute(
-                    "UPDATE documents SET actual_page_count = ?, "
+                    "UPDATE images SET actual_page_count = ?, "
                     "page_count_mismatch = ? WHERE id = ?",
-                    [actual_pages, mismatch, document_id],
+                    [actual_pages, mismatch, image_id],
                 )
                 if mismatch:
                     mismatches.append(
-                        {"document_id": document_id, "declared": declared,
+                        {"image_id": image_id, "declared": declared,
                          "actual": actual_pages}
                     )
-            docs_indexed += 1
+            images_indexed += 1
 
-            for sec in toc_sections:
-                section_id = sec["sectionId"]
-                # documentFamily is a secondary detection signal in the section
+            for doc in toc_documents:
+                document_id = doc["sectionId"]
+                # documentFamily is a secondary detection signal in the document
                 # metadata (not in the toc); read it when present.
-                sec_meta = (
-                    _load(doc_dir / sec["metadataPath"])
-                    if sec.get("metadataPath")
+                doc_meta = (
+                    _load(doc_dir / doc["metadataPath"])
+                    if doc.get("metadataPath")
                     else {}
                 )
                 con.execute(
                     """
-                    INSERT INTO sections (id, case_id, document_id, section_slug,
-                        section_index, title, source_page_start, source_page_end,
+                    INSERT INTO documents (id, case_id, image_id, document_slug,
+                        document_index, title, source_page_start, source_page_end,
                         page_count, boundary_confidence, detection_tier,
                         document_family, needs_review, created_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
-                        section_id, case_id, document_id, sec.get("sectionSlug"),
-                        sec.get("sectionIndex"), sec.get("title"),
-                        sec.get("sourcePageStart"), sec.get("sourcePageEnd"),
-                        sec.get("pageCount"), sec.get("boundaryConfidence"),
-                        sec.get("detectionTier"), sec_meta.get("documentFamily", ""),
-                        bool(sec.get("needsHumanReview")), generated_at,
+                        document_id, case_id, image_id, doc.get("sectionSlug"),
+                        doc.get("sectionIndex"), doc.get("title"),
+                        doc.get("sourcePageStart"), doc.get("sourcePageEnd"),
+                        doc.get("pageCount"), doc.get("boundaryConfidence"),
+                        doc.get("detectionTier"), doc_meta.get("documentFamily", ""),
+                        bool(doc.get("needsHumanReview")), generated_at,
                     ],
                 )
-                sections_n += 1
+                documents_n += 1
 
-                for page in sec.get("pages", []):
+                for page in doc.get("pages", []):
                     spn = page["sourcePageNumber"]
                     text_path = doc_dir / page["textPath"]
                     text = (
@@ -171,14 +176,14 @@ def _index_documents(
                         citation_display = citation.get("display", "")
                     con.execute(
                         """
-                        INSERT INTO chunks (id, case_id, document_id, section_id,
+                        INSERT INTO chunks (id, case_id, image_id, document_id,
                             text, page_number, source_page_number, paragraph_number,
                             text_span_start, text_span_end, extraction_method,
                             citation_low, citation_display, confidence, created_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, NULL, ?)
                         """,
                         [
-                            f"{section_id}_p{spn}", case_id, document_id, section_id,
+                            f"{document_id}_p{spn}", case_id, image_id, document_id,
                             text, page.get("pageNumber"), spn, "pdf_text",
                             citation_low, citation_display, generated_at,
                         ],
@@ -186,9 +191,9 @@ def _index_documents(
                     chunks_n += 1
 
     return {
-        "sections": sections_n,
+        "documents": documents_n,
         "chunks": chunks_n,
-        "documents_indexed": docs_indexed,
-        "orphan_documents": orphan_documents,
+        "images_indexed": images_indexed,
+        "orphan_images": orphan_images,
         "mismatches": mismatches,
     }

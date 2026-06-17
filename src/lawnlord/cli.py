@@ -4,6 +4,10 @@
     lawnlord report [root]             read-only archive/section report (no writes)
     lawnlord build [root]              build the corpus from the intake packet
     lawnlord emit-boundaries [root]    write a reviewable manual-boundary draft
+    lawnlord index [intake]            explode + ingest + index into DuckDB
+    lawnlord pack [intake]             package case.json + filings as the source of truth
+    lawnlord assemble [intake]         reassemble images into one master PDF (round-trip proof)
+    lawnlord query                     read-only search over the index (with provenance)
 
 ``root`` defaults to the current directory; lawnlord resolves the intake/corpus
 locations from it (honoring an optional lawnlord.toml). All the real work lives
@@ -18,6 +22,7 @@ from pathlib import Path
 from rich.table import Table
 
 from .archive import inspect_source
+from .assemble import assemble_case
 from .boundaries import load_manual_boundaries
 from .console import console
 from .corpus import write_corpus
@@ -29,10 +34,10 @@ from .intake import load_intake, resolve_packet, scaffold
 from .ocr import make_ocr
 from .pack import pack_case
 from .query import (
-    documents_by_event,
-    documents_by_party,
-    documents_by_phase,
-    needs_review_sections,
+    images_by_event,
+    images_by_party,
+    images_by_phase,
+    needs_review_documents,
     search_text,
 )
 from .reporting import report_archive, write_boundary_template
@@ -163,6 +168,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output zip path (default: <caseNumber>.zip in the current directory)",
     )
 
+    p_assemble = sub.add_parser(
+        "assemble",
+        help="Reassemble the case's images into one master PDF (the lossless round-trip proof)",
+    )
+    p_assemble.add_argument(
+        "intake",
+        nargs="?",
+        default=".",
+        help="Provider intake folder (e.g. .../intake/combo) with case JSON + filings/",
+    )
+    p_assemble.add_argument(
+        "-o", "--output", default=None,
+        help="Output master PDF path (default: <caseNumber>-master.pdf in the current directory)",
+    )
+
     p_query = sub.add_parser(
         "query", help="Read-only search over the case index (with provenance)"
     )
@@ -204,6 +224,35 @@ def main(argv: list[str] | None = None) -> None:
         console.print(table)
         for rel in stats["missing"]:
             console.print(f"[yellow]Missing source PDF (not packed):[/] {rel}")
+        console.print("[green]Done.[/]")
+        return
+
+    if args.command == "assemble":
+        case = Case.from_intake(args.intake)
+        out_pdf = (
+            Path(args.output) if args.output
+            else Path.cwd() / f"{case.case_slug}-master.pdf"
+        )
+        stats = assemble_case(case, out_pdf)
+        table = Table(title="Reassembled master PDF")
+        table.add_column("Metric")
+        table.add_column("Value", justify="right")
+        table.add_row("Case", case.case_number)
+        table.add_row("Images", str(stats["images"]))
+        table.add_row("Pages", str(stats["pages"]))
+        table.add_row("Outline entries", str(stats["outline_entries"]))
+        table.add_row("Embedded attachments carried", str(stats["embedded_attachments"]))
+        table.add_row("Missing images", str(len(stats["missing"])))
+        lossless = stats["text_lossless"]
+        table.add_row(
+            "Text-lossless round-trip",
+            "[green]yes[/]" if lossless else "[red]NO[/]" if lossless is False else "n/a",
+        )
+        table.add_row("Master PDF", stats["out_pdf"])
+        table.add_row("Manifest", stats["manifest"])
+        console.print(table)
+        for rel in stats["missing"]:
+            console.print(f"[yellow]Missing source image (not assembled):[/] {rel}")
         console.print("[green]Done.[/]")
         return
 
@@ -319,13 +368,13 @@ def _run_query(args) -> None:
         if args.text is not None:
             _render_rows(f"text: {args.text!r}", search_text(con, args.text, args.limit))
         elif args.needs_review:
-            _render_rows("needs review", needs_review_sections(con))
+            _render_rows("needs review", needs_review_documents(con))
         elif args.phase is not None:
-            _render_rows(f"phase: {args.phase}", documents_by_phase(con, args.phase))
+            _render_rows(f"phase: {args.phase}", images_by_phase(con, args.phase))
         elif args.event is not None:
-            _render_rows(f"event: {args.event}", documents_by_event(con, args.event))
+            _render_rows(f"event: {args.event}", images_by_event(con, args.event))
         elif args.party is not None:
-            _render_rows(f"party: {args.party}", documents_by_party(con, args.party))
+            _render_rows(f"party: {args.party}", images_by_party(con, args.party))
         else:
             console.print(
                 "[red]Specify a filter:[/] --text / --needs-review / --phase / --event / --party"
@@ -341,26 +390,26 @@ def _print_index_summary(case, ingest_stats: dict, index_stats: dict) -> None:
     table.add_row("Case", case.case_number)
     table.add_row("Parties", str(ingest_stats["parties"]))
     table.add_row("Events", str(ingest_stats["events"]))
-    table.add_row("Documents", str(ingest_stats["documents"]))
-    table.add_row("Document↔event links", str(ingest_stats["document_events"]))
-    table.add_row("Sections", str(index_stats["sections"]))
+    table.add_row("Images (filed PDFs)", str(ingest_stats["images"]))
+    table.add_row("Image↔event links", str(ingest_stats["image_events"]))
+    table.add_row("Documents (within images)", str(index_stats["documents"]))
     table.add_row("Chunks (pages)", str(index_stats["chunks"]))
     table.add_row("Page-count mismatches", str(len(index_stats["mismatches"])))
-    table.add_row("Un-docketed documents", str(index_stats["orphan_documents"]))
+    table.add_row("Un-docketed images", str(index_stats["orphan_images"]))
     table.add_row("DuckDB", str(case.duckdb_path))
     console.print(table)
-    if ingest_stats["skipped_documents"]:
+    if ingest_stats["skipped_images"]:
         console.print(
-            f"[yellow]Skipped (no source PDF):[/] {len(ingest_stats['skipped_documents'])}"
+            f"[yellow]Skipped (no source PDF):[/] {len(ingest_stats['skipped_images'])}"
         )
-    if index_stats["orphan_documents"]:
+    if index_stats["orphan_images"]:
         console.print(
-            f"[yellow]Un-docketed documents indexed (not in filings.json):[/]"
-            f" {index_stats['orphan_documents']}"
+            f"[yellow]Un-docketed images indexed (not in filings.json):[/]"
+            f" {index_stats['orphan_images']}"
         )
     for m in index_stats["mismatches"]:
         console.print(
-            f"[yellow]Page-count mismatch:[/] {m['document_id']} "
+            f"[yellow]Page-count mismatch:[/] {m['image_id']} "
             f"declared {m['declared']} vs actual {m['actual']}"
         )
     console.print("[green]Done.[/]")
