@@ -19,3 +19,6 @@ dist/
 # the case archive repo (e.g. ../gcp-hoa-case/intake/<provider>/). Tests use
 # hermetic tmp_path fixtures, not committed case data.
 intake/
+
+# case-workspace config scaffolded by `lawnlord start` — belongs in a case repo, not here
+lawnlord.toml
