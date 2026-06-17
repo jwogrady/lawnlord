@@ -28,6 +28,7 @@ from .archive import inspect_source
 from .assemble import assemble_case
 from .bundle import bundle_case
 from .boundaries import load_manual_boundaries
+from .combine import combine
 from .compare import emit_compare
 from .console import console
 from .corpus import write_corpus
@@ -249,6 +250,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_compare.add_argument("--dpi", type=int, default=150, help="Render DPI for the page images")
 
+    p_combine = sub.add_parser(
+        "combine",
+        help="Compile the ody + txe portal views into one combo provider intake",
+    )
+    p_combine.add_argument(
+        "--ody", required=True,
+        help="Odyssey view: the case JSONs + filings/ (the filed PDFs)",
+    )
+    p_combine.add_argument(
+        "--txe", default=None,
+        help="re:SearchTX view: meta.json (the enrichment merged in at parse time)",
+    )
+    p_combine.add_argument(
+        "-o", "--output", dest="out", default=None,
+        help="Combo intake dir to write (default: <ody>/../combo)",
+    )
+
     return parser
 
 
@@ -377,6 +395,31 @@ def _main(argv: list[str] | None = None) -> None:
         console.print(table)
         console.print(
             f"[green]Done.[/] View it: [bold]cd web && COMPARE_DIR={out} bun dev[/]"
+        )
+        return
+
+    if args.command == "combine":
+        out = args.out or str(Path(args.ody).resolve().parent / "combo")
+        console.print(
+            f"[bold]Combining[/] ody[dim]({args.ody})[/] + "
+            f"txe[dim]({args.txe or '—'})[/] → {out}"
+        )
+        stats = combine(args.ody, args.txe, out)
+        case = Case.from_intake(out, case_dir=".")
+        table = Table(title="Combo intake")
+        table.add_column("Metric")
+        table.add_column("Value", justify="right")
+        table.add_row("Case", case.case_number)
+        table.add_row("Odyssey JSONs", str(stats["ody_jsons"]))
+        table.add_row("Filed PDFs", str(stats["filings"]))
+        table.add_row("Parties", str(len(case.parties)))
+        table.add_row("Events", str(len(case.events)))
+        table.add_row("Documents", str(len(case.documents)))
+        table.add_row("re:SearchTX merged", "yes" if stats["meta"] else "no")
+        table.add_row("Out", stats["out"])
+        console.print(table)
+        console.print(
+            f"[green]Done.[/] Now: [bold]lawnlord compare {out} --gpu[/]"
         )
         return
 
