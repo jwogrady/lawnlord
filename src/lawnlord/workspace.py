@@ -58,6 +58,20 @@ class Case:
         ``case_dir`` is the output root for generated artifacts (default: cwd).
         """
         intake_dir = Path(intake_dir).resolve()
+        if not intake_dir.is_dir():
+            raise FileNotFoundError(f"intake folder not found: {intake_dir}")
+        markers = ("case-summary.json", "case-history.json", "filings.json", "meta.json")
+        if not (
+            any((intake_dir / m).exists() for m in markers)
+            or (intake_dir / "filings").is_dir()
+        ):
+            raise FileNotFoundError(
+                f"{intake_dir} is not a provider intake folder. "
+                "compare/index/pack/assemble/bundle expect a provider export — case JSON "
+                "(case-summary.json / case-history.json / filings.json) plus a filings/ "
+                "directory, e.g. intake/combo or intake/ody. (A packet ZIP is the input for "
+                "`lawnlord build`, not for these commands.)"
+            )
         provider = intake_dir.name
         model = parse_provider(provider, intake_dir)
         case_dir = Path(case_dir).resolve() if case_dir else Path.cwd()
