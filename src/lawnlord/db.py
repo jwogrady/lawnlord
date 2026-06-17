@@ -22,8 +22,10 @@ from pathlib import Path
 import duckdb
 
 # v2: re-leveled documents->images and sections->documents (docs/plans/v0.3.0).
+# v3: landed the standard schema — case identity facets, financials +
+#     financial_transactions, party aliases, and case_gaps.
 # Per-case DBs are regenerable, so the bump needs no in-place migration.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # One statement per table; CREATE ... IF NOT EXISTS keeps apply_schema idempotent.
 _SCHEMA_STATEMENTS = (
@@ -33,13 +35,19 @@ _SCHEMA_STATEMENTS = (
         id TEXT PRIMARY KEY,
         title TEXT,
         court TEXT,
+        clerk TEXT,
         judicial_officer TEXT,
         case_type TEXT,
+        case_category TEXT,
         status TEXT,
         date_filed TEXT,
+        citation_number TEXT,
         disposition_type TEXT,
         disposition_date TEXT,
+        disposition_comment TEXT,
         source_url TEXT,
+        last_refreshed TEXT,
+        source_note TEXT,
         created_at TEXT
     )
     """,
@@ -51,7 +59,35 @@ _SCHEMA_STATEMENTS = (
         name TEXT,
         representation TEXT,
         attorneys TEXT,
+        aliases TEXT,
         location TEXT
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS financials (
+        case_id TEXT PRIMARY KEY,
+        party TEXT,
+        total_assessment TEXT,
+        total_payments TEXT,
+        balance_due TEXT,
+        balance_as_of TEXT
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS financial_transactions (
+        case_id TEXT NOT NULL,
+        idx INTEGER NOT NULL,
+        date TEXT,
+        description TEXT,
+        amount TEXT,
+        PRIMARY KEY (case_id, idx)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS case_gaps (
+        case_id TEXT NOT NULL,
+        field TEXT NOT NULL,
+        PRIMARY KEY (case_id, field)
     )
     """,
     """

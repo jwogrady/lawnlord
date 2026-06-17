@@ -123,3 +123,60 @@ def test_missing_pdf_is_skipped_not_fabricated(ody_intake, tmp_path):
     assert con.execute(
         "SELECT count(*) FROM images WHERE sha256_hash IS NULL OR sha256_hash = ''"
     ).fetchone()[0] == 0
+
+
+# --- C4: the standard schema landed in DuckDB --------------------------------
+
+
+def test_ingest_lands_standard_identity_fields(combo_intake, tmp_path):
+    case = main.Case.from_intake(combo_intake, case_dir=tmp_path / "out")
+    con = _fresh_db(tmp_path)
+    main.ingest_case(con, case, GEN)
+    row = con.execute(
+        "SELECT citation_number, case_category, clerk, last_refreshed, "
+        "disposition_comment, source_note, date_filed FROM cases"
+    ).fetchone()
+    assert row[0] == "CIT-7788"
+    assert row[1] == "Civil - Other Civil"  # caseTypeAlt
+    assert row[2] == "Test County - District Clerk"
+    assert row[3]  # lastRefreshed present
+    assert row[4] == "Final Summary Judgment"
+    assert "total is 26" in row[5]
+    assert row[6] == "2025-01-02"  # ISO-normalized
+
+
+def test_ingest_lands_financials_and_transactions(combo_intake, tmp_path):
+    case = main.Case.from_intake(combo_intake, case_dir=tmp_path / "out")
+    con = _fresh_db(tmp_path)
+    main.ingest_case(con, case, GEN)
+    fin = con.execute("SELECT total_assessment, balance_due FROM financials").fetchone()
+    assert fin == ("366", "0")
+    txns = con.execute(
+        "SELECT date, amount FROM financial_transactions ORDER BY idx"
+    ).fetchall()
+    assert len(txns) == 2
+    assert txns[0][0] == "2025-01-08"  # ISO-normalized
+    assert txns[1][1] == "-366"
+
+
+def test_ingest_records_gaps(tmp_path):
+    # A bare case (missing standard fields) records its gaps.
+    model = main.CaseModel(provider="combo", identity=main.CaseIdentity(case_number="9-9-9"))
+    case = main.Case(intake_dir=tmp_path, provider="combo", case_dir=tmp_path, model=model)
+    con = _fresh_db(tmp_path)
+    main.ingest_case(con, case, GEN)
+    gaps = {r[0] for r in con.execute(
+        "SELECT field FROM case_gaps WHERE case_id = '9-9-9'"
+    ).fetchall()}
+    assert {"court", "caseType", "parties", "documents", "financials"} <= gaps
+    # The complete combo case records no gaps.
+
+
+def test_party_aliases_landed(combo_intake, tmp_path):
+    case = main.Case.from_intake(combo_intake, case_dir=tmp_path / "out")
+    con = _fresh_db(tmp_path)
+    main.ingest_case(con, case, GEN)
+    import json as _json
+    rows = con.execute("SELECT name, aliases FROM parties").fetchall()
+    aliases = {name: _json.loads(a) for name, a in rows}
+    assert aliases.get("Acme Association") == ["GCPRA"]
