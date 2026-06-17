@@ -63,12 +63,50 @@ def test_provider_selector_falls_back_to_odyssey(ody_intake):
     assert main.parse_provider("mystery", ody_intake) == main.parse_odyssey(ody_intake)
 
 
-def test_combo_provider_registered(ody_intake):
+def test_combo_provider_registered():
     # `combo` (the reconciled best-of-both intake, the recommended source of
-    # truth) is Odyssey-shaped and registered explicitly, not just via fallback.
-    assert "combo" in main.PROVIDERS
-    assert main.PROVIDERS["combo"] is main.parse_odyssey
-    assert main.parse_provider("combo", ody_intake) == main.parse_odyssey(ody_intake)
+    # truth) is registered as the merge adapter, not the bare Odyssey adapter.
+    assert main.PROVIDERS["combo"] is main.parse_combo
+
+
+def test_combo_degrades_to_odyssey_without_meta(ody_intake):
+    # An Odyssey folder with no meta.json / no financials parses identically
+    # to parse_odyssey (the merge adds nothing it doesn't have).
+    assert main.parse_combo(ody_intake) == main.parse_odyssey(ody_intake)
+
+
+def test_combo_merges_research_meta(combo_intake):
+    model = main.parse_combo(combo_intake)
+    # Base Odyssey data is preserved.
+    assert model.identity.case_number == "99-00-12345"
+    assert {d.filename for d in model.documents} >= {"Final_Judgment.pdf", "Petition.pdf"}
+
+    # Attorney bar number merged from meta.json onto the matching party/attorney.
+    plaintiff = next(p for p in model.parties if p.role == "Plaintiff")
+    counsel = next(a for a in plaintiff.attorneys if a.name == "Pat Counsel")
+    assert counsel.number == "24000001"
+
+    # Hearings table (with result) comes from meta.json.
+    assert len(model.hearings) == 1
+    assert model.hearings[0].result == "Canceled - Case Disposed"
+
+    # Financial summary lifted from the Odyssey financialInformation block.
+    assert model.financials is not None
+    assert model.financials.total_assessment == "366"
+    assert model.financials.balance_due == "0"
+
+
+def test_combo_docket_carries_comments_and_links_files(combo_intake):
+    model = main.parse_combo(combo_intake)
+    # All meta.json event rows become docket entries, including the pure
+    # docket entry with no document.
+    assert len(model.docket) == 2
+    granted = next(d for d in model.docket if "granted" in d.comment)
+    assert granted.documents[0].declared_page_count == 4
+    # The docket document name resolved back to the source PDF.
+    assert granted.documents[0].intake_path == "filings/Final_Judgment.pdf"
+    no_doc = next(d for d in model.docket if not d.documents)
+    assert "submission" in no_doc.comment
 
 
 def test_missing_files_are_tolerated(tmp_path):
