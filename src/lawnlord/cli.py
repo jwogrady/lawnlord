@@ -394,7 +394,8 @@ def _main(argv: list[str] | None = None) -> None:
         table.add_row("Out", stats["out"])
         console.print(table)
         console.print(
-            f"[green]Done.[/] View it: [bold]cd web && COMPARE_DIR={out} bun dev[/]"
+            f"[green]Done.[/] View it: "
+            f"[bold]cd web && COMPARE_DIR={out.resolve()} bun dev[/]"
         )
         return
 
