@@ -65,6 +65,14 @@ A derived, regenerable index over the same record plus the exploded corpus. Tabl
 `documents`, `chunks` (one row per page; FTS over `text`), and the `knowledge_documents` stub. Read
 `db.py` `_SCHEMA_STATEMENTS` for exact columns.
 
+## Additive-only invariant
+
+The mirrored record and its generated provenance — hashes, page ranges, slugs, boundary
+tier/confidence, paths, and citations — are immutable. The **only** way to add curated metadata is
+the `ALLOWED_CURATED_FIELDS` whitelist (`curation.apply_metadata_overlay`); no overlay, proposal, or
+verdict can change a generated field, and the whitelist itself may never include one. This single
+chokepoint is pinned by `tests/test_schema_levels.py` (#37).
+
 ## Below the image: the `document` level — `section == document` (decision, #34)
 
 The image is the court-defined leaf. lawnlord decomposes it into the **documents within an image** —
