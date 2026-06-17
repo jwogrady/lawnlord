@@ -117,6 +117,35 @@ def test_lazy_ocr_degrades_when_extra_missing(monkeypatch):
     doc.close()
 
 
+# --- re-extract a single page image (the reviewer's correction loop) --------
+
+
+def _png(tmp_path):
+    """A throwaway 1-page PNG for the reviewer to re-extract from."""
+    doc = fitz.open()
+    doc.new_page().insert_text((72, 72), "FILED PAGE")
+    png = tmp_path / "page.png"
+    doc[0].get_pixmap().save(png)
+    doc.close()
+    return png
+
+
+def test_ocr_image_reextracts_from_a_png(tmp_path, monkeypatch):
+    # ocr_image opens the image as a one-page doc and runs the same engine —
+    # an on-demand re-extraction consistent with the original build.
+    monkeypatch.setattr("lawnlord.ocr.make_ocr", lambda **k: _fake_ocr)
+    text, conf = main.ocr_image(str(_png(tmp_path)))
+    assert text == "OCR RECOVERED TEXT" and conf == 0.87
+
+
+def test_ocr_page_cli_emits_only_json(tmp_path, monkeypatch, capsys):
+    # The CLI prints ONLY JSON on stdout so the web server can parse it.
+    monkeypatch.setattr("lawnlord.ocr.make_ocr", lambda **k: _fake_ocr)
+    cli.main(["ocr-page", str(_png(tmp_path))])
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {"text": "OCR RECOVERED TEXT", "confidence": 0.87}
+
+
 def test_empty_ocr_result_leaves_page_native(tmp_path):
     # A degraded/empty OCR result must NOT mislabel the page as textSource=ocr;
     # it stays native + empty (and is flagged for review elsewhere).

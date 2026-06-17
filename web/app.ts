@@ -16,6 +16,17 @@ type Review = {
 type Filing = { title: string; type: string; date: string };
 type DocPart = { title: string; family: string } | null;
 
+// Append-only correction history. rev 0 is the original extraction (immutable,
+// from compare.json); each entry here is a re-extraction or human edit.
+type Revision = {
+	rev: number;
+	text: string;
+	source: string; // ocr | human | revert
+	at: string;
+	note?: string;
+	confidence?: number | null;
+};
+
 type Page = {
 	id: string;
 	filing: Filing;
@@ -32,6 +43,7 @@ type Page = {
 	score: number; // lawnlord confidence, 0..1
 	note: string;
 	review: Review;
+	revisions: Revision[]; // corrections appended after rev 0 (the original)
 };
 
 type Integrity = {
@@ -99,6 +111,21 @@ function esc(s: string): string {
 
 function reviewedCount(): number {
 	return data.pages.filter((p) => p.review?.reviewed).length;
+}
+
+// The full revision chain for a page: rev 0 is the original extraction (from
+// compare.json), followed by every appended correction. The last entry is current.
+function allRevisions(p: Page): Revision[] {
+	return [
+		{
+			rev: 0,
+			text: p.text,
+			source: p.textSource || "original",
+			at: "",
+			note: "original extraction",
+		},
+		...(p.revisions ?? []),
+	];
 }
 
 // One group per filed image (case → filing → image). Each carries the rendered
@@ -298,6 +325,25 @@ function renderEnhanced(): void {
 						: ""
 				}`
 			: `p.${p.page}`;
+
+	// the correction chain — rev 0 (original) then every appended edit/re-extract
+	const revs = allRevisions(p);
+	const curRev = revs[revs.length - 1];
+	const fmtAt = (s: string) => (s ? s.slice(0, 16).replace("T", " ") : "");
+	const history = revs
+		.map((r) => {
+			const isCur = r.rev === curRev.rev;
+			const conf =
+				r.confidence != null
+					? ` · ${Math.round(r.confidence * 100)}% conf`
+					: "";
+			const meta = `rev ${r.rev} · ${esc(r.source)}${r.at ? ` · ${esc(fmtAt(r.at))}` : ""}${r.note ? ` · ${esc(r.note)}` : ""}${conf}`;
+			const action = isCur
+				? `<span class="revcur">current</span>`
+				: `<button class="revert" data-rev="${r.rev}">revert</button>`;
+			return `<div class="rev${isCur ? " cur" : ""}"><span class="revmeta">${meta}</span>${action}</div>`;
+		})
+		.join("");
 	app.innerHTML = `
     <aside class="docs">
       <div class="docs-h">Case contents — ${esc(data.case)}</div>
@@ -314,12 +360,18 @@ function renderEnhanced(): void {
       <section class="compare">
         <figure><figcaption>FILED PAGE — original</figcaption><img src="${p.actual}" alt="filed page" /></figure>
         <figure class="textfig">
-          <figcaption>OUR TEXT${p.textSource ? ` — ${esc(p.textSource)}` : ""}${
+          <figcaption>OUR TEXT — ${esc(curRev.source)}${curRev.rev ? ` (rev ${curRev.rev})` : ""}${
 						data.masterPdf
 							? ` · <a href="/${esc(data.masterPdf)}#page=${p.masterPage}" target="_blank" rel="noopener">reconstructed PDF ↗</a>`
 							: ""
 					}</figcaption>
-          <div class="textpane">${p.text ? esc(p.text) : '<span class="empty">— no text extracted on this page —</span>'}</div>
+          <textarea id="textedit" class="textedit" spellcheck="false">${esc(curRev.text)}</textarea>
+          <div class="textctl">
+            <button id="reextract">⟳ re-extract from image</button>
+            <button id="savetext">save correction</button>
+            <span id="savestate" class="savestate"></span>
+          </div>
+          <details class="revs"><summary>revision history (${revs.length})</summary>${history}</details>
         </figure>
       </section>
       <section class="review">
@@ -363,6 +415,58 @@ function wire(p: Page, myScore: number): void {
 		};
 	}
 	document.querySelector(".pageitem.cur")?.scrollIntoView({ block: "nearest" });
+
+	// correction loop: re-extract from the image, save a human edit, or revert —
+	// each POSTs and appends a revision; nothing is overwritten.
+	const editEl = document.getElementById("textedit") as HTMLTextAreaElement;
+	const stateEl = document.getElementById("savestate") as HTMLElement;
+	async function applyRevisions(history: Revision[]): Promise<void> {
+		p.revisions = history;
+		render();
+	}
+	(document.getElementById("reextract") as HTMLButtonElement).onclick =
+		async () => {
+			stateEl.textContent = "extracting…";
+			const res = await fetch("/api/extract", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ id: p.id, image: p.actual }),
+			});
+			const out = await res.json();
+			if (!out.ok) {
+				stateEl.textContent = `re-extract failed: ${out.error ?? "error"}`;
+				return;
+			}
+			await applyRevisions(out.history);
+		};
+	(document.getElementById("savetext") as HTMLButtonElement).onclick =
+		async () => {
+			const res = await fetch("/api/revise", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ id: p.id, text: editEl.value }),
+			});
+			await applyRevisions((await res.json()).history);
+		};
+	for (const el of document.querySelectorAll(".revert")) {
+		(el as HTMLButtonElement).onclick = async () => {
+			const rev = Number((el as HTMLElement).dataset.rev);
+			const target = allRevisions(p).find((r) => r.rev === rev);
+			if (!target) return;
+			const res = await fetch("/api/revise", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({
+					id: p.id,
+					text: target.text,
+					source: "revert",
+					note: `reverted to rev ${rev}`,
+				}),
+			});
+			await applyRevisions((await res.json()).history);
+		};
+	}
+
 	(document.getElementById("prev") as HTMLButtonElement).onclick = () => {
 		if (idx > 0) idx--;
 		render();

@@ -298,6 +298,82 @@ body {
 	font-style: italic;
 }
 
+/* editable text pane: our extraction, correctable in place */
+.textedit {
+	height: 60vh;
+	overflow: auto;
+	background: var(--cream);
+	color: #1a1a12;
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	padding: 18px 22px;
+	white-space: pre-wrap;
+	word-break: break-word;
+	resize: vertical;
+	font: 14px / 1.6 var(--font-sans);
+}
+.textctl {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin-top: 8px;
+}
+.textctl button {
+	padding: 7px 12px;
+	border-radius: 8px;
+	border: 1px solid var(--line);
+	background: #1b2310;
+	color: var(--cream);
+	cursor: pointer;
+	font: inherit;
+}
+.textctl button:hover {
+	border-color: var(--gold-deep);
+}
+.textctl .savestate {
+	color: var(--muted);
+	font-size: 12px;
+}
+
+/* append-only revision history — rev 0 is the immutable original */
+.revs {
+	margin-top: 10px;
+	font-size: 12px;
+	color: var(--muted);
+}
+.revs summary {
+	cursor: pointer;
+	color: var(--gold);
+	letter-spacing: 0.4px;
+}
+.rev {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: 10px;
+	padding: 5px 8px;
+	border-bottom: 1px solid var(--line);
+}
+.rev.cur {
+	color: var(--cream);
+}
+.rev .revcur {
+	color: var(--grass);
+}
+.rev .revert {
+	background: transparent;
+	border: 1px solid var(--line);
+	border-radius: 6px;
+	color: var(--muted);
+	cursor: pointer;
+	padding: 2px 8px;
+	font: inherit;
+}
+.rev .revert:hover {
+	border-color: var(--gold-deep);
+	color: var(--cream);
+}
+
 /* Original mode: the court's own filing as a native PDF (no annotations) */
 .single figcaption {
 	color: var(--muted);

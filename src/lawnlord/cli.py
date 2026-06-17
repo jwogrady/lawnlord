@@ -250,6 +250,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_compare.add_argument("--dpi", type=int, default=150, help="Render DPI for the page images")
 
+    p_ocr = sub.add_parser(
+        "ocr-page",
+        help="Re-run OCR on a single page image; print JSON {text, confidence}",
+    )
+    p_ocr.add_argument("image", help="Path to the page image (e.g. a compare artifact PNG)")
+    p_ocr.add_argument(
+        "--gpu", action="store_true", help="Run OCR on the GPU (CUDA) when available"
+    )
+
     p_combine = sub.add_parser(
         "combine",
         help="Compile the ody + txe portal views into one combo provider intake",
@@ -402,6 +411,17 @@ def _main(argv: list[str] | None = None) -> None:
             f"[green]Done.[/] View it: "
             f"[bold]cd web && COMPARE_DIR={out.resolve()} bun dev[/]"
         )
+        return
+
+    if args.command == "ocr-page":
+        # Single-page re-extraction for the reviewer. Emit ONLY JSON on stdout so
+        # the web server can parse it; anything else (warnings) goes to stderr.
+        import json
+
+        from .ocr import ocr_image
+
+        text, confidence = ocr_image(args.image, use_gpu=args.gpu)
+        print(json.dumps({"text": text, "confidence": confidence}))
         return
 
     if args.command == "combine":
