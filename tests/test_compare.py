@@ -56,6 +56,13 @@ def test_emit_compare_renders_pages_scores_and_json(tmp_path):
     # output reconciles with the manifest: 2 rendered == 2 declared, no drops
     assert data["integrity"]["ok"] is True and not data["integrity"]["errors"]
     assert data["integrity"]["renderedPages"] == 2
+    # the Original layer is emitted verbatim: the court's register of actions
+    man = json.loads((out / "manifest.json").read_text())
+    assert man["case"] == "55-00-8" and man["registerOfActions"]
+    assert any(
+        e["filing"] and e["filing"]["declaredPages"] == 2
+        for e in man["registerOfActions"]
+    )
     # native text + declared(2)==actual(2) + docketed -> full confidence
     assert data["pages"][0]["score"] == 1.0
 

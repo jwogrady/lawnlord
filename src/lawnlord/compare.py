@@ -156,12 +156,19 @@ def emit_compare(
                     "note": _note(bool(mismatch), bool(has_text), tsource),
                 }
             )
+        # The Original layer: the court's register of actions, verbatim from
+        # the ingested court metadata (events + filings + declared counts) —
+        # no derived fields. Built while the connection is open.
+        court_manifest = _court_manifest(con, case.case_number)
     finally:
         master.close()
         for src in src_cache.values():
             src.close()
         con.close()
 
+    (out_dir / "manifest.json").write_text(
+        json.dumps(court_manifest, indent=2), encoding="utf-8"
+    )
     integrity = _reconcile(rendered, declared_by, actual_by, len(pages))
     (out_dir / "compare.json").write_text(
         json.dumps(
@@ -221,4 +228,61 @@ def _reconcile(
         "ok": not errors,
         "errors": errors,
         "flags": flags,
+    }
+
+
+def _court_manifest(con, case_number: str) -> dict:
+    """The Original layer: the court's record, verbatim from ingested metadata.
+
+    Case header + parties + the register of actions (every docket event in
+    chronological order, with its filing and the court's DECLARED page count).
+    No derived fields — this is the immutable "what is".
+    """
+    crow = con.execute(
+        "SELECT id, court, judicial_officer, case_type, status, date_filed "
+        "FROM cases LIMIT 1"
+    ).fetchone()
+    case_id = crow[0] if crow else None
+    parties = [
+        {"role": r[0], "name": r[1], "representation": r[2]}
+        for r in con.execute(
+            "SELECT role, name, representation FROM parties WHERE case_id = ? "
+            "ORDER BY role, name",
+            [case_id],
+        ).fetchall()
+    ]
+    register = [
+        {
+            "date": r[0],
+            "type": r[1],
+            "party": r[2],
+            "description": r[3],
+            "filing": (
+                {"title": r[4], "image": r[5], "declaredPages": r[6]}
+                if r[5]
+                else None
+            ),
+        }
+        for r in con.execute(
+            """
+            SELECT e.date, e.event_type, e.party, e.description,
+                   i.title, i.filename, i.declared_page_count
+            FROM events e
+            LEFT JOIN image_events ie ON ie.event_id = e.id
+            LEFT JOIN images i ON i.id = ie.image_id
+            WHERE e.case_id = ?
+            ORDER BY e.date, e.id
+            """,
+            [case_id],
+        ).fetchall()
+    ]
+    return {
+        "case": case_number,
+        "court": crow[1] if crow else None,
+        "judicialOfficer": crow[2] if crow else None,
+        "caseType": crow[3] if crow else None,
+        "status": crow[4] if crow else None,
+        "dateFiled": crow[5] if crow else None,
+        "parties": parties,
+        "registerOfActions": register,
     }

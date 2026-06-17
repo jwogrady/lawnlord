@@ -24,6 +24,13 @@ const server = Bun.serve({
 	development: { hmr: true, console: true },
 	routes: {
 		"/": index,
+		// Original layer: the court's register of actions, verbatim.
+		"/api/manifest": async () => {
+			const file = Bun.file(join(COMPARE_DIR, "manifest.json"));
+			return (await file.exists())
+				? Response.json(await file.json())
+				: Response.json({ registerOfActions: [] });
+		},
 		"/api/pages": async () => {
 			const data = await Bun.file(join(COMPARE_DIR, "compare.json")).json();
 			const reviews = await loadReviews();
@@ -64,7 +71,7 @@ const server = Bun.serve({
 		if (url.pathname === "/favicon.ico") {
 			return new Response(Bun.file(join(import.meta.dir, "favicon.ico")));
 		}
-		if (url.pathname.startsWith("/images/")) {
+		if (url.pathname.startsWith("/images/") || url.pathname.endsWith(".pdf")) {
 			const file = Bun.file(join(COMPARE_DIR, url.pathname));
 			if (await file.exists()) return new Response(file);
 		}
