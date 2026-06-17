@@ -82,6 +82,13 @@ Build top to bottom. Each milestone depends on the one above it.
 - [#30](https://github.com/jwogrady/lawnlord/issues/30) — Factual docket timeline derived from filing dates (what IS)
 - [#37](https://github.com/jwogrady/lawnlord/issues/37) — Enforce the additive-only invariant (test-proven)
 
+### v0.4.1 — Compare & review UI
+[Milestone #7](https://github.com/jwogrady/lawnlord/milestone/7) · *Human-in-the-loop review of the is-layer: actual vs reconstructed, page by page, with the reviewer's rating vs lawnlord's score.*
+
+- ✅ Shipped: [#66](https://github.com/jwogrady/lawnlord/issues/66) reviewer UI · [#67](https://github.com/jwogrady/lawnlord/issues/67) `lawnlord compare` emitter · [#68](https://github.com/jwogrady/lawnlord/issues/68) logo.
+- [#69](https://github.com/jwogrady/lawnlord/issues/69) — Reviewer: group & navigate by **document/exhibit** (compare at the litigation unit)
+- [#70](https://github.com/jwogrady/lawnlord/issues/70) — Fold **actual-vs-reconstructed fidelity** into the page score (stop the uniform 1.0)
+
 ### v0.5.0 — Knowledge base + computed deadline timeline
 [Milestone #3](https://github.com/jwogrady/lawnlord/milestone/3) · *Curated external context the user supplies, plus the real clock derived from the record.*
 
