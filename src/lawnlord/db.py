@@ -134,9 +134,19 @@ _SCHEMA_STATEMENTS = (
 )
 
 
-def open_case_db(path: str | Path) -> duckdb.DuckDBPyConnection:
-    """Open (creating if needed) the per-case DuckDB database at ``path``."""
+def open_case_db(
+    path: str | Path, read_only: bool = False
+) -> duckdb.DuckDBPyConnection:
+    """Open the per-case DuckDB database at ``path``.
+
+    Read-write by default (creating the file and parent dirs if needed);
+    pass ``read_only=True`` for queries, which requires an existing database.
+    """
     path = Path(path)
+    if read_only:
+        if not path.exists():
+            raise FileNotFoundError(f"case database not found: {path}")
+        return duckdb.connect(str(path), read_only=True)
     path.parent.mkdir(parents=True, exist_ok=True)
     return duckdb.connect(str(path))
 
