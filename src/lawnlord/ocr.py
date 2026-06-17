@@ -99,3 +99,39 @@ def make_ocr(dpi: int = DEFAULT_OCR_DPI, use_gpu: bool = False) -> OcrFn:
         return text, confidence
 
     return ocr
+
+
+def make_lazy_ocr(dpi: int = DEFAULT_OCR_DPI, use_gpu: bool = False) -> OcrFn:
+    """An OCR backend that builds its engine **lazily** — only when the first
+    image-only (text-less) page is actually encountered — and **degrades
+    gracefully** when the optional ``ocr`` extra is not installed.
+
+    This is what makes auto-OCR safe to leave on by default:
+
+    - Born-digital cases (every page has a text layer) never construct an engine,
+      so there is no model-load cost and the explosion is byte-identical.
+    - If a scanned page is found but the ``ocr`` extra is missing, it warns once
+      and returns empty text — the page stays empty and is flagged for review,
+      rather than failing the whole build.
+    """
+    state = {"engine": None, "disabled": False, "warned": False}
+
+    def ocr(page: fitz.Page) -> tuple[str, float | None]:
+        if state["disabled"]:
+            return "", None
+        if state["engine"] is None:
+            try:
+                state["engine"] = make_ocr(dpi=dpi, use_gpu=use_gpu)
+            except RuntimeError as exc:
+                state["disabled"] = True
+                if not state["warned"]:
+                    from .console import console
+                    console.print(
+                        "[yellow]OCR unavailable — scanned pages will be left empty"
+                        f" and flagged for review (install the 'ocr' extra): {exc}[/]"
+                    )
+                    state["warned"] = True
+                return "", None
+        return state["engine"](page)
+
+    return ocr

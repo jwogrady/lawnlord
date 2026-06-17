@@ -114,9 +114,15 @@ def explode_document(
                 ocr_confidence = None
                 # Recover text for a scanned page (no embedded text) when OCR
                 # is enabled. OCR text is machine-generated and tagged as such.
+                # Only relabel as "ocr" when OCR actually recovered text — a
+                # degraded/empty result leaves the page native+empty (and flagged).
                 if not page_text.strip() and ocr is not None:
-                    page_text, ocr_confidence = ocr(source_page)
-                    text_source = "ocr"
+                    ocr_text, ocr_confidence = ocr(source_page)
+                    if ocr_text.strip():
+                        page_text = ocr_text
+                        text_source = "ocr"
+                    else:
+                        ocr_confidence = None
                 if not page_text.strip():
                     empty_text_pages += 1
                 (document_dir / text_rel).write_text(page_text, encoding="utf-8")
