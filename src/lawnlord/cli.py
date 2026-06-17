@@ -10,6 +10,7 @@
     lawnlord bundle [intake]           wrap the complete case (metadata + master + pages + index) into one zip
     lawnlord query                     read-only search over the index (with provenance)
     lawnlord timeline                  read-only factual timeline (docket events + extracted dates)
+    lawnlord compare [intake]          render actual vs reconstructed pages + scores for the web reviewer
 
 ``root`` defaults to the current directory; lawnlord resolves the intake/corpus
 locations from it (honoring an optional lawnlord.toml). All the real work lives
@@ -27,6 +28,7 @@ from .archive import inspect_source
 from .assemble import assemble_case
 from .bundle import bundle_case
 from .boundaries import load_manual_boundaries
+from .compare import emit_compare
 from .console import console
 from .corpus import write_corpus
 from .curation import load_curation
@@ -229,6 +231,24 @@ def build_parser() -> argparse.ArgumentParser:
         "--case-dir", default=".", help="Case output root holding lawnlord.duckdb (default: cwd)"
     )
 
+    p_compare = sub.add_parser(
+        "compare",
+        help="Render actual vs reconstructed pages + scores for the web reviewer",
+    )
+    p_compare.add_argument("intake", nargs="?", default=".", help="Provider intake folder")
+    p_compare.add_argument(
+        "--case-dir", default=".", help="Output root for corpus + DuckDB (default: cwd)"
+    )
+    p_compare.add_argument(
+        "-o", "--output", dest="out", default=None,
+        help="Compare artifact dir (default: <case-dir>/compare)",
+    )
+    p_compare.add_argument("--no-ocr", action="store_true", help="Disable OCR (the fast path)")
+    p_compare.add_argument(
+        "--gpu", action="store_true", help="Run OCR on the GPU (CUDA) when available"
+    )
+    p_compare.add_argument("--dpi", type=int, default=150, help="Render DPI for the page images")
+
     return parser
 
 
@@ -329,6 +349,25 @@ def main(argv: list[str] | None = None) -> None:
         for rel in stats["missing"]:
             console.print(f"[yellow]Missing source image (not assembled):[/] {rel}")
         console.print("[green]Done.[/]")
+        return
+
+    if args.command == "compare":
+        case = Case.from_intake(args.intake, case_dir=args.case_dir)
+        out = Path(args.out) if args.out else Path(args.case_dir) / "compare"
+        console.print(
+            f"[bold]Case:[/] {case.case_number}  [dim]building + rendering compare → {out}[/]"
+        )
+        stats = emit_compare(case, out, ocr=_ocr_for(args), dpi=args.dpi)
+        table = Table(title="Compare artifact")
+        table.add_column("Metric")
+        table.add_column("Value", justify="right")
+        table.add_row("Case", stats["case"])
+        table.add_row("Pages rendered", str(stats["pages"]))
+        table.add_row("Out", stats["out"])
+        console.print(table)
+        console.print(
+            f"[green]Done.[/] View it: [bold]cd web && COMPARE_DIR={out} bun dev[/]"
+        )
         return
 
     if args.command == "index":
