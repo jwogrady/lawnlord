@@ -239,9 +239,15 @@ def parse_odyssey(intake_dir: str | Path) -> CaseModel:
 
 
 # Provider folder name -> adapter. Aliases keep the selector forgiving.
+# ``combo`` is a reconciled best-of-both intake (the recommended source of
+# truth): it is Odyssey-shaped — it carries the four Odyssey JSONs plus the
+# full document set — so it parses with the Odyssey adapter. Any extra
+# reference metadata it may also hold (e.g. a re:SearchTX meta.json) is left to
+# the deferred cross-source reconciliation milestone.
 PROVIDERS = {
     "ody": parse_odyssey,
     "odyssey": parse_odyssey,
+    "combo": parse_odyssey,
 }
 
 
