@@ -97,7 +97,7 @@ This README is the project's homepage and present state. The documents below are
 standards and code summaries — each is kept current or deleted when no longer relevant.
 
 **How we work**
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) — the doc model, conventions, and non-negotiable engineering invariants.
+- [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) — the doc model, conventions, and non-negotiable engineering invariants.
 
 **Code summaries** (provable by reading the source)
 - [`docs/architecture.md`](docs/architecture.md) — modules, data flow, the DuckDB schema, enforced invariants.

@@ -1,6 +1,6 @@
 # Contributing
 
-This is a personal, **proprietary** project with a single maintainer (see [`LICENSE`](LICENSE)).
+This is a personal, **proprietary** project with a single maintainer (see [`LICENSE`](../LICENSE)).
 These are the working rules for how the project is built and maintained — by the maintainer and by
 any AI agents working in the repo. The license stays most-restrictive until the project is opened to
 contributors or released.
