@@ -79,3 +79,23 @@ def test_build_corpus_from_folder(tmp_path):
     # Full per-document page coverage preserved in folder mode.
     for entry in main.inspect_folder(folder)["pdfEntries"]:
         assert main.covers_exactly(entry.sections, entry.page_count)
+
+
+def test_changed_source_under_same_name_is_reextracted(tmp_path):
+    # A re-run reuses an existing submission only when the source bytes match.
+    # If the source under the same name changes, the stale extraction must be
+    # rebuilt — otherwise its pages won't line up with the rebuilt index/master.
+    folder = _make_folder(tmp_path, {"doc-one.pdf": ["ORIGINAL"]})
+    corpus = tmp_path / "corpus"
+    m1 = main.write_corpus(folder, corpus, force=False, manual_boundaries={}, curation={})
+    id1 = m1["submissions"][0]["submissionId"]
+
+    # Same filename (same slug), different content + page count.
+    (folder / "doc-one.pdf").write_bytes(_pdf_bytes(["REPLACED", "page two"]))
+    m2 = main.write_corpus(folder, corpus, force=False, manual_boundaries={}, curation={})
+    assert m2["submissions"][0]["submissionId"] != id1  # content-keyed id changed
+    assert m2["submissions"][0]["pageCount"] == 2  # reflects the new 2-page source
+
+    # An unchanged re-run keeps the same id (genuine reuse, the fast path).
+    m3 = main.write_corpus(folder, corpus, force=False, manual_boundaries={}, curation={})
+    assert m3["submissions"][0]["submissionId"] == m2["submissions"][0]["submissionId"]

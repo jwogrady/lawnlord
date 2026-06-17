@@ -496,18 +496,25 @@ def write_corpus(
             submission_dir = submissions_dir / entry.submission_slug
 
             if submission_dir.exists() and not force:
-                console.print(
-                    f"[yellow]Skipping existing submission:[/] {entry.submission_slug}"
-                )
+                # Reuse only when the on-disk extraction came from the SAME source
+                # bytes. submissionId encodes the source sha256, so a changed source
+                # under the same slug is detected and re-extracted — otherwise the
+                # stale pages would not line up with the freshly rebuilt index and
+                # master (a hard-to-trace "page number out of range").
                 existing = submission_entry_from_existing(submission_dir)
-                if existing is None:
+                if (
+                    existing is not None
+                    and existing.get("submissionId") == f"sub_{entry.sha256[:16]}"
+                ):
                     console.print(
-                        f"[red]Warning:[/] could not read metadata under"
-                        f" {submission_dir}; manifest entry omitted"
+                        f"[yellow]Skipping existing submission:[/] {entry.submission_slug}"
                     )
-                else:
                     manifest["submissions"].append(existing)
-                continue
+                    continue
+                console.print(
+                    f"[yellow]Re-extracting (source changed):[/] {entry.submission_slug}"
+                )
+                shutil.rmtree(submission_dir)
 
             if submission_dir.exists() and force:
                 shutil.rmtree(submission_dir)
