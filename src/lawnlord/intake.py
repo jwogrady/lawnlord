@@ -117,6 +117,12 @@ _CONFIG_TEMPLATE = """\
 # lawnlord configuration. Paths are relative to this file's directory
 # (or absolute). Delete a key to use its default.
 [lawnlord]
+# Where the intake lives. Two supported layouts:
+#   local  -> "intake"                  (provider folders under ./intake/)
+#   repo   -> "../gcp-hoa-case/intake"  (case data in a separate repo)
+# The LAWNLORD_INTAKE env var overrides this for provider commands
+# (compare/index/pack/assemble/bundle/combine), which also accept a bare
+# provider name (e.g. `lawnlord compare combo`) resolved under this root.
 intake = "intake"   # inputs: the source packet ZIP + optional curated files
 corpus = "corpus"   # generated output (regenerable)
 """
