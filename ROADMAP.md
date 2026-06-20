@@ -86,9 +86,27 @@ Build top to bottom. Each milestone depends on the one above it.
 is the data-view contract. This is the substrate cross-referencing, case linking, and argument
 tagging build on, so it ships first and alone.*
 
-- **Zip → DuckDB reader** — parse `data.json` (validated by `schema.json`) into the `CaseModel`,
-  ingest into DuckDB, extract `files/` safely; replaces the deleted provider adapters
-  (`workspace.from_intake` is currently a stub awaiting this).
+- **Zip → DuckDB reader + schema re-scope** *(the first branch; un-stubs `workspace.from_intake`)*.
+  The DuckDB schema is the **relational mirror of the zip** — `data.json`, formally described by the
+  zip's own `schema.json`. Spec:
+  - **Read** — extract the zip safely (`is_suspicious_entry` on every entry), **validate `data.json`
+    against the bundled `schema.json`** (fail loud if the zip drifts from its own contract), then map
+    into `models.CaseModel`. This replaces the deleted provider adapters.
+  - **Honor the schema, don't codegen from it** — `schema.json` is the contract to validate against;
+    the relational DDL is hand-authored (JSON-Schema→SQL auto-generation is brittle: nested arrays
+    become child tables, and every field is typed `string`).
+  - **Mirror stores values verbatim** — `schema.json` types everything as `string`
+    (`"Page Count": "6"`, `"366.00"`, `"09/05/2025"`); the mirror keeps the raw strings — that *is*
+    the immutable base. Typed/normalized values (numbers, ISO dates) are a **derived/additive** view,
+    never the mirror (keeps "mirror exactly, then add" honest at the DB layer).
+  - **Re-scope the schema to the zip** — keep the tables that mirror `data.json`
+    (`cases`, `parties`, `events`, `images`, `image_events`, `financials`, `financial_transactions`);
+    **drop the four inherited additive tables** (`documents`, `chunks`, `extracted_dates`,
+    `knowledge_documents`) that belonged to the removed explosion/transcription/dates/KB layers and
+    aren't in the zip. The page-text/transcription layer returns later as a clearly-additive table on
+    the Exploded view, not in the mirror.
+  - Bump `SCHEMA_VERSION`; per-case DBs are regenerable, so no in-place migration. DuckDB stays a
+    pure, regenerable function of the zip.
 - **Actual view — "as if logged into Odyssey."** A faithful reproduction of the portal: case header
   (caption, court, judge, status, filed date), parties, and the register of actions as a
   **sortable / filterable** case-history table (date · type · party · page count · linked doc). Each
