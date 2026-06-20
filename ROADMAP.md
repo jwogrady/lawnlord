@@ -81,14 +81,15 @@ Build top to bottom. Each milestone depends on the one above it.
 > on top of the two foundational views, and their additive pieces will be **reimplemented over the
 > zip** (see *Reimplementation backlog*). The principle is unchanged: mirror exactly, then add.
 
-### Foundation (alpha) — two views over the zip
-*Recreate exactly the views the zip's pages already contain — nothing additive. Each page of the zip
-is the data-view contract. This is the substrate cross-referencing, case linking, and argument
-tagging build on, so it ships first and alone.*
+### v0.4.0 — Foundation: zip import + Actual & Exploded lenses
+[Milestone #8](https://github.com/jwogrady/lawnlord/milestone/8) · *Recreate exactly the views the
+zip's pages already contain — nothing additive. Each page of the zip is the data-view contract. The
+substrate that cross-referencing, case linking, and argument tagging build on, so it ships first and
+alone.* Five ordered, codify-sized steps (each builds on the last):
 
-- **Zip → DuckDB reader + schema re-scope** *(the first branch; un-stubs `workspace.from_intake`)*.
-  The DuckDB schema is the **relational mirror of the zip** — `data.json`, formally described by the
-  zip's own `schema.json`. Spec:
+- **[F1 · #92](https://github.com/jwogrady/lawnlord/issues/92) — Import the zip → CaseModel + DuckDB**
+  *(un-stubs `workspace.from_intake`)*. The DuckDB schema is the **relational mirror of the zip** —
+  `data.json`, formally described by the zip's own `schema.json`:
   - **Read** — extract the zip safely (`is_suspicious_entry` on every entry), **validate `data.json`
     against the bundled `schema.json`** (fail loud if the zip drifts from its own contract), then map
     into `models.CaseModel`. This replaces the deleted provider adapters.
@@ -99,44 +100,50 @@ tagging build on, so it ships first and alone.*
     (`"Page Count": "6"`, `"366.00"`, `"09/05/2025"`); the mirror keeps the raw strings — that *is*
     the immutable base. Typed/normalized values (numbers, ISO dates) are a **derived/additive** view,
     never the mirror (keeps "mirror exactly, then add" honest at the DB layer).
-  - **Re-scope the schema to the zip** — keep the tables that mirror `data.json`
+  - **Re-scope the schema to the zip** — keep the seven tables that mirror `data.json`
     (`cases`, `parties`, `events`, `images`, `image_events`, `financials`, `financial_transactions`);
     **drop the four inherited additive tables** (`documents`, `chunks`, `extracted_dates`,
-    `knowledge_documents`) that belonged to the removed explosion/transcription/dates/KB layers and
-    aren't in the zip. The page-text/transcription layer returns later as a clearly-additive table on
-    the Exploded view, not in the mirror.
-  - Bump `SCHEMA_VERSION`; per-case DBs are regenerable, so no in-place migration. DuckDB stays a
-    pure, regenerable function of the zip.
-- **Actual view — "as if logged into Odyssey."** A faithful reproduction of the portal: case header
-  (caption, court, judge, status, filed date), parties, and the register of actions as a
-  **sortable / filterable** case-history table (date · type · party · page count · linked doc). Each
-  filing opens as its **native PDF** (selectable text, real paging — *not* a render), with deep-link
-  paging (`#page=N&view=FitH`). **This view ends at the image.** Purpose: visually verify LawnLord
-  matches Odyssey. Optionally render the captured `pages/*.html` for true snapshot parity.
-- **Exploded view — inside each filed PDF.** Navigate case → filing → image → page; transcribe each
-  page from a **PNG render via AI** (not OCR — measured as materially more accurate), shown beside
-  the page image. Surface integrity (rendered vs declared page counts; mismatches flagged, never
-  hidden).
+    `knowledge_documents`). The page-text/transcription layer returns at F3/F4 as a clearly-additive
+    layer, not in the mirror.
+  - Bump `SCHEMA_VERSION`; per-case DBs are regenerable, so no in-place migration.
+- **[F2 · #93](https://github.com/jwogrady/lawnlord/issues/93) — Actual lens ("as if logged into
+  Odyssey").** A faithful reproduction of the portal: case header (caption, court, judge, status,
+  filed date), parties, and the register of actions as a **sortable / filterable** case-history table
+  (date · type · party · page count · linked doc). Each filing opens as its **native PDF** (selectable
+  text, real paging — *not* a render), deep-link paged (`#page=N&view=FitH`). **Ends at the image.**
+  Also renders the captured `pages/*.html` verbatim for true snapshot parity. Purpose: visually
+  verify LawnLord matches Odyssey.
+- **[F3 · #94](https://github.com/jwogrady/lawnlord/issues/94) — Explode the images.** Split each
+  filed PDF into its documents and pages; render each page to a PNG; persist an **additive**
+  documents/pages index (never mutating the F1 mirror). Surface declared-vs-rendered page-count
+  mismatches (flagged, never hidden).
+- **[F4 · #95](https://github.com/jwogrady/lawnlord/issues/95) — Transcribe each page.** PNG render →
+  **AI transcription** (not OCR — materially more accurate); append-only (rev 0 immutable); a per-page
+  **transcription-vs-image fidelity** signal (the honest reframing of the folded #70). Cloud opt-in
+  (`ANTHROPIC_API_KEY`).
+- **[F5 · #96](https://github.com/jwogrady/lawnlord/issues/96) — Exploded lens.** Lens switch Actual ↔
+  Exploded; navigate case → filing → image → page; page image **beside its transcription**; document
+  grouping; integrity flags.
 
-### v0.4.0 — Canonical "is" layer (the readiness gate)
-[Milestone #2](https://github.com/jwogrady/lawnlord/milestone/2) · *Mirror exactly, extract all text+meta, reconstruct from the data, prove confidence against both sources.*
+> **Lenses as labels.** Every issue carries `lens:*` / `layer:*` labels (`lens:actual`,
+> `lens:exploded`, `lens:defense`, `lens:plaintiff`, `layer:foundation`, `layer:platform`) so the
+> tracker reads by lens as well as by milestone. Deferred: the Plaintiff lens, the lens-switcher as
+> its own issue, and the analysis-mechanism split — out of the foundation loop on purpose.
 
-- [#34](https://github.com/jwogrady/lawnlord/issues/34) — Settle & implement the `section` level *(decision; gates #31)*
-- [#35](https://github.com/jwogrady/lawnlord/issues/35) — Resolve the `document` vocabulary collision: one glossary *(decision; gates #31)* · `documentation`
-- [#31](https://github.com/jwogrady/lawnlord/issues/31) — Content schema in DuckDB: per-page text + preserved-page-image pointer
-- [#32](https://github.com/jwogrady/lawnlord/issues/32) — Reconstruct `case-master.pdf` **from the data** + burned-in searchable text layer
-- [#33](https://github.com/jwogrady/lawnlord/issues/33) — Two-sided confidence: reconstruction vs Odyssey metadata **and** source PDFs → `aiAccessible`
-- [#36](https://github.com/jwogrady/lawnlord/issues/36) — Extract deadline/order dates from key documents as provenanced **facts**
-- [#30](https://github.com/jwogrady/lawnlord/issues/30) — Factual docket timeline derived from filing dates (what IS)
-- [#37](https://github.com/jwogrady/lawnlord/issues/37) — Enforce the additive-only invariant (test-proven)
+### v0.4.0 (superseded) — Canonical "is" layer
+[Milestone #2 (closed)](https://github.com/jwogrady/lawnlord/milestone/2) · **Superseded by the alpha
+pivot.** This is-layer (content schema, reconstruct-from-data, two-sided confidence, date facts;
+issues #30–#37) was built then **removed** when the rake zip became the sole standard. Where it still
+matters, it re-expresses on the zip: the mirror is now **F1 (#92)**; per-page text + fidelity is
+**F3/F4 (#94/#95)**; the additive-only invariant now rides on the immutable zip. Closed for history.
 
-### v0.4.1 — Compare & review UI
-[Milestone #7](https://github.com/jwogrady/lawnlord/milestone/7) · *Human-in-the-loop review of the is-layer: actual vs reconstructed, page by page, with the reviewer's rating vs lawnlord's score.*
-
-> **Removed in the alpha pivot.** The first-generation web app ([#66](https://github.com/jwogrady/lawnlord/issues/66) reviewer UI, [#67](https://github.com/jwogrady/lawnlord/issues/67) `lawnlord compare` emitter) was deleted with the rest of the additive layer; the logo ([#68](https://github.com/jwogrady/lawnlord/issues/68)) survives. The review/compare workflow is **rebased** to be reimplemented on top of the two foundational views — see *Reimplementation backlog* for the patterns worth carrying over.
-
-- [#69](https://github.com/jwogrady/lawnlord/issues/69) — Reviewer: group & navigate by **document/exhibit** (compare at the litigation unit)
-- [#70](https://github.com/jwogrady/lawnlord/issues/70) — Fold **actual-vs-reconstructed fidelity** into the page score (stop the uniform 1.0)
+### v0.4.1 (superseded) — Compare & review UI
+[Milestone #7 (closed)](https://github.com/jwogrady/lawnlord/milestone/7) · **Superseded by the alpha
+pivot.** The first-generation web reviewer ([#66](https://github.com/jwogrady/lawnlord/issues/66),
+[#67](https://github.com/jwogrady/lawnlord/issues/67)) was deleted; the logo
+([#68](https://github.com/jwogrady/lawnlord/issues/68)) survives. [#70](https://github.com/jwogrady/lawnlord/issues/70)
+folded into **F4 (#95)**. The review/lens UI returns as **F2/F5 (#93/#96)** plus the lens switcher.
+Closed for history.
 
 ### v0.5.0 — Knowledge base + computed deadline timeline
 [Milestone #3](https://github.com/jwogrady/lawnlord/milestone/3) · *Curated external context the user supplies, plus the real clock derived from the record.*
@@ -185,11 +192,11 @@ additive layer is rebuilt over the zip.
 - **Integrity surfaced, never hidden** — rendered vs declared page counts; mismatches flagged (⚑).
 
 **Additive layers (deferred — reimplement over the zip, per their milestones)**
-- **AI page layer** → v0.4.0/v0.6.0: PNG-render → AI transcription (beats OCR); summary/analysis as
-  **accept/decline proposals** ([#28](https://github.com/jwogrady/lawnlord/issues/28)) that never
-  overwrite the record; transcription lands as a revision, analysis as a pending proposal.
-- **Human review signal** → v0.4.1: rate 0–100 (good–bad), note, flag, mark-reviewed; the **gap vs
-  lawnlord's own score** is the point.
+- **AI page layer** → transcription is **F4 (#95)**; summary/analysis as **accept/decline proposals**
+  ([#28](https://github.com/jwogrady/lawnlord/issues/28), v0.6.0) that never overwrite the record —
+  transcription lands as a revision, analysis as a pending proposal.
+- **Human review signal** → v0.6.0: rate 0–100 (good–bad), note, flag, mark-reviewed; the **gap vs
+  lawnlord's own analysis** is the point.
 
 **Engineering patterns worth keeping**
 - **Append-only revision history** — rev 0 is the immutable original; every re-extract / human edit
@@ -204,7 +211,7 @@ The prerequisite chain above is authoritative for sequencing; the broader vision
 milestones but is recorded here so it isn't lost (aspirational design lives on the roadmap, not in
 the code summaries):
 
-- **Extraction depth** — paragraph chunking, knowledge-base files → v0.4.0 / v0.5.0.
+- **Extraction depth** — page transcription is F3/F4 (#94/#95); paragraph chunking + knowledge-base files → v0.5.0.
 - **Entity layer** — Facts / Events / Claims / Citations / Deadlines, extracted with provenance → v0.6.0 ([#38](https://github.com/jwogrady/lawnlord/issues/38)).
 - **Relationships / case graph** — Claim→governed-by→Statute, Order→creates→Deadline → v0.6.0 ([#38](https://github.com/jwogrady/lawnlord/issues/38)).
 - **Reasoning** — timelines, evidence maps, gap/contradiction analysis → v0.5.0 ([#42](https://github.com/jwogrady/lawnlord/issues/42)), v0.8.0 ([#40](https://github.com/jwogrady/lawnlord/issues/40)).
