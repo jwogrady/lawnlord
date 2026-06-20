@@ -1,7 +1,7 @@
 [project]
 name = "lawnlord"
 version = "0.3.0"
-description = "Local-first toolkit for legal court records: explode each case document into citation-preserving sections and pages with full provenance — the deterministic substrate for a case-understanding engine."
+description = "Local-first legal case-understanding engine: mirror a court case from its deterministic export (the rake zip) into a verifiable, source-traceable index — the substrate for reading and fighting the case."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.13"
@@ -28,9 +28,7 @@ classifiers = [
     "Topic :: Text Processing",
 ]
 dependencies = [
-    "anthropic>=0.109.2",
     "duckdb>=1.1",
-    "pymupdf>=1.27.2.3",
     "python-slugify>=8.0.4",
     "rich>=15.0.0",
 ]
@@ -38,16 +36,10 @@ dependencies = [
 [project.urls]
 Repository = "https://github.com/jwogrady/lawnlord"
 Changelog = "https://github.com/jwogrady/lawnlord/blob/master/CHANGELOG.md"
-Roadmap = "https://github.com/jwogrady/lawnlord/blob/master/docs/ROADMAP.md"
+Roadmap = "https://github.com/jwogrady/lawnlord/blob/master/ROADMAP.md"
 
 [project.scripts]
 lawnlord = "lawnlord.cli:main"
-
-[project.optional-dependencies]
-ocr = [
-    "numpy>=2.4.6",
-    "rapidocr-onnxruntime>=1.4.4",
-]
 
 [dependency-groups]
 dev = [
