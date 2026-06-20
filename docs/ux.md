@@ -2,47 +2,38 @@
 
 > **Provable from the code.** Every command, flag, and output below is what `cli.py` and its
 > handlers actually do. If this doc and the code disagree, **the code wins.** lawnlord is CLI- and
-> data-first; there is no interactive UI. Planned features live in the [ROADMAP](../ROADMAP.md).
+> data-first; there is no interactive UI yet. Planned features live in the [ROADMAP](../ROADMAP.md).
 
 Entry points: the `lawnlord` console script and `python -m lawnlord` (`__main__.py`), both call
 `cli.main()`.
+
+> **Alpha rebuild.** After the pivot to the zip standard, the only command that runs today is
+> `start`. The zip → DuckDB build and the Actual / Exploded views are the next branches
+> ([ROADMAP](../ROADMAP.md)).
 
 ## Subcommands (`cli.py`)
 
 | Command | Arg | Key flags | Writes | Read-only |
 |---|---|---|---|---|
 | `start` | `root` | `--force` | `intake/`, `lawnlord.toml`, `intake/README.md` | no |
-| `report` | `root` | `--packet` | — (prints tables) | **yes** |
-| `build` | `root` | `--packet`, `--corpus-dir`, `--force`, `--no-ocr`, `--gpu` | `corpus/` tree | no |
-| `emit-boundaries` | `root` | `--packet` | `intake/bundle-boundaries.generated.json` (draft) | inspection only |
-| `index` | `intake` | `--case-dir`, `--force`, `--no-ocr`, `--gpu` | `extracted/corpus/`, `lawnlord.duckdb` | no |
-| `pack` | `intake` | `-o/--output` | `<caseNumber>.zip` (case.json + filings/) | no |
-| `assemble` | `intake` | `-o/--output` | `<caseNumber>-master.pdf` + `.manifest.json` | no |
-| `bundle` | `intake` | `-o/--output` | `<caseNumber>.bundle.zip` | no |
-| `query` | — | `--case-dir`, `--text`, `--needs-review`, `--event`, `--phase`, `--party`, `--limit` | — (prints tables) | **yes** |
 
-## Argument styles
+`start` scaffolds the intake folder under `root` (default cwd): the `intake/` dir, a starter
+`lawnlord.toml`, and an intake README explaining that the deterministic zip is the single source of
+truth. Existing files are left alone unless `--force`.
 
-- `start` / `report` / `build` / `emit-boundaries` resolve an **intake folder from `root`** (default
-  cwd) via optional `lawnlord.toml`; `--packet` points at a specific ZIP or a folder of PDFs (errors
-  if zero or multiple ZIPs and no `--packet`).
-- `index` / `pack` / `assemble` / `bundle` take a **provider intake folder** (`[intake]`, default
-  cwd); `query` reads `lawnlord.duckdb` under `--case-dir`.
+## Intake-root resolution (`cli._resolve_intake`, `cli._intake_root`)
 
-## Outputs
+So case data can live in a separate repo or local in the project, an intake folder is resolved as an
+explicit path (used as-is) **or** a bare name under the configured intake root, in this order:
 
-- **corpus** (`build` / `index`): `archive.json`, `manifest.json`, and per
-  `submission / document / section`: `source.pdf`, `toc.json`, and
-  `sections/<NNN-slug>/{section.pdf, pages/page-NNN.pdf, text/page-NNN.txt, analysis/page-NNN.json}`.
-- **index** (`index` / `bundle`): `lawnlord.duckdb` (schema v3 + BM25 FTS, LIKE fallback).
-- **assemble**: a master PDF with a `FILING → IMAGE → DOC` outline, embedded attachments and
-  annotations carried across, and a page-provenance `.manifest.json`; the summary reports
-  text-lossless and visual-lossless round-trips.
-- **bundle**: `case.json` + `filings/` + `case-master.pdf` + `pages/<stem>/pNNN.txt` +
-  `lawnlord.duckdb` + `bundle-manifest.json` (all relative paths, self-contained).
-- **query** results carry provenance: image title, source page, citation string.
+1. `LAWNLORD_INTAKE` env var,
+2. `lawnlord.toml`'s `[lawnlord] intake` (absolute or relative to the project),
+3. `./intake` (the in-project default).
 
-## Not built (see the ROADMAP)
+The intake itself is the deterministic zip (`<case>.zip`); `intake.resolve_packet` locates the single
+`*.zip` in the intake dir.
 
-No interactive dashboard, no "ask what law applies," no strategy chat, no accept/decline UI, no
-computed timeline. Those are planned in the [ROADMAP](../ROADMAP.md); they are not callable today.
+## Not built yet (see the ROADMAP)
+
+No zip → DuckDB build, no query, no Actual/Exploded views, no analysis or accept/decline UI. Those are
+the near-term work in the [ROADMAP](../ROADMAP.md); they are not callable today.

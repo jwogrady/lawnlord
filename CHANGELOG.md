@@ -10,6 +10,49 @@ state *before* a release) lives in the [ROADMAP](ROADMAP.md); the current workin
 always the commit. Each release below links to its **release milestone** and the **issues** it
 closed.
 
+## [Unreleased] — alpha pivot: the zip is the intake standard
+
+**Branch:** `refactor/zip-standard-intake` · **Backup of the prior state:** the `alpha` branch.
+
+A deliberate teardown to rebuild on a verified foundation. The intake standard is now the
+**deterministic `rake` zip** (`schema.json` + `data.json` + `files/` + `pages/`) — the single source
+of truth, self-verifying via per-file sha256, with DuckDB built from it **exclusively**. Mirror the
+record exactly; everything else is additive — and all the additive layers were removed here so they
+can be reimplemented cleanly over the zip (see the [ROADMAP](ROADMAP.md) *Reimplementation backlog*).
+
+### Removed
+
+- **Provider adapters** — `ody` / `txe` / `combo` parsing and the `combine` command (`providers.py`,
+  `combine.py`, `unify.py`). The zip replaces multi-portal parsing and reconciliation.
+- **The entire additive layer** — the Claude page layer (`ai.py`, `analysis_schema.py`), document
+  explosion / four-tier boundary detection (`boundaries.py`, `corpus.py`, `index.py`), master-PDF
+  reconstruction and packaging (`assemble.py`, `bundle.py`, `pack.py`, `canonical.py`), confidence
+  scoring (`confidence.py`), date-fact extraction (`dates.py`), the curation overlay (`curation.py`),
+  `--force` review preservation (`preservation.py`), full-text search (`query.py`), and packet
+  inspection / reporting (`archive.py`, `reporting.py`).
+- **The first-generation web app** (`web/`) — the Original/Enhanced compare reviewer. Its good ideas
+  are preserved in the ROADMAP *Reimplementation backlog*, not the code.
+- **CLI** — every subcommand except `start` (`report`, `build`, `emit-boundaries`, `index`, `pack`,
+  `assemble`, `bundle`, `query`, `timeline`, `compare`, `ocr-page`, `ai-page`, `combine`).
+- **Dependencies** — `anthropic`, `pymupdf`, and the `ocr` extra (`rapidocr`, `numpy`).
+
+### Changed
+
+- **`models.py`** now owns the `CaseModel` data contract (relocated from `providers.py`) plus
+  `case_slug` / `is_suspicious_entry`. The filed-PDF directory constant is `FILES_DIRNAME = "files"`
+  (was `filings/`).
+- **`workspace.Case.from_intake`** is a stub pending the zip → `CaseModel` reader (next branch);
+  `ingest.ingest_case` consumes the model directly (no `unify`).
+- **`intake.py`** describes the deterministic zip rather than a packet + curated files.
+
+### Notes
+
+- Surviving suite: **27 tests** green. The package imports and `lawnlord start` runs; the zip reader,
+  the two foundational views (Actual, Exploded), and the re-scoped DuckDB schema are the next
+  branches in the [ROADMAP](ROADMAP.md). The DuckDB schema is still the inherited `SCHEMA_VERSION = 6`
+  and retains tables the current ingest no longer populates (`documents`, `chunks`, `extracted_dates`,
+  `knowledge_documents`) — to be re-scoped to the zip's level.
+
 ## [0.3.0] - 2026-06-17
 
 **Milestone:** [v0.3.0 (#1)](https://github.com/jwogrady/lawnlord/milestone/1) · **Tag:** [v0.3.0](https://github.com/jwogrady/lawnlord/releases/tag/v0.3.0) _(GitHub release pending)_ · **Issues:** [#14](https://github.com/jwogrady/lawnlord/issues/14) · [#15](https://github.com/jwogrady/lawnlord/issues/15) · [#16](https://github.com/jwogrady/lawnlord/issues/16) · [#17](https://github.com/jwogrady/lawnlord/issues/17) · [#18](https://github.com/jwogrady/lawnlord/issues/18) · [#19](https://github.com/jwogrady/lawnlord/issues/19) · [#20](https://github.com/jwogrady/lawnlord/issues/20)
