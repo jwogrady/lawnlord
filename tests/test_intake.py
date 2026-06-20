@@ -15,9 +15,6 @@ def test_load_intake_defaults(tmp_path):
     intake = load_intake(tmp_path)
     assert intake.intake_dir == (tmp_path / "intake").resolve()
     assert intake.corpus_dir == (tmp_path / "corpus").resolve()
-    assert intake.manual_boundaries_path.name == "bundle-boundaries.json"
-    assert intake.curation_path.name == "corpus-curation.json"
-    assert intake.generated_boundaries_path.name == "bundle-boundaries.generated.json"
 
 
 def test_load_intake_honors_config(tmp_path):

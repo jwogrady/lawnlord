@@ -30,11 +30,6 @@ CONFIG_FILENAME = "lawnlord.toml"
 DEFAULT_INTAKE_DIRNAME = "intake"
 DEFAULT_CORPUS_DIRNAME = "corpus"
 
-# Curated-input filenames, resolved inside the intake dir.
-MANUAL_BOUNDARIES_FILENAME = "bundle-boundaries.json"
-GENERATED_BOUNDARIES_FILENAME = "bundle-boundaries.generated.json"
-CURATION_FILENAME = "corpus-curation.json"
-
 
 @dataclass(frozen=True)
 class Intake:
@@ -43,18 +38,6 @@ class Intake:
     root: Path
     intake_dir: Path
     corpus_dir: Path
-
-    @property
-    def manual_boundaries_path(self) -> Path:
-        return self.intake_dir / MANUAL_BOUNDARIES_FILENAME
-
-    @property
-    def curation_path(self) -> Path:
-        return self.intake_dir / CURATION_FILENAME
-
-    @property
-    def generated_boundaries_path(self) -> Path:
-        return self.intake_dir / GENERATED_BOUNDARIES_FILENAME
 
 
 def load_intake(root: str | Path = ".") -> Intake:
@@ -118,30 +101,23 @@ _CONFIG_TEMPLATE = """\
 # (or absolute). Delete a key to use its default.
 [lawnlord]
 # Where the intake lives. Two supported layouts:
-#   local  -> "intake"                  (provider folders under ./intake/)
+#   local  -> "intake"                  (the intake zip under ./intake/)
 #   repo   -> "../gcp-hoa-case/intake"  (case data in a separate repo)
-# The LAWNLORD_INTAKE env var overrides this for provider commands
-# (compare/index/pack/assemble/bundle/combine), which also accept a bare
-# provider name (e.g. `lawnlord compare combo`) resolved under this root.
-intake = "intake"   # inputs: the source packet ZIP + optional curated files
+# The LAWNLORD_INTAKE env var overrides this.
+intake = "intake"   # inputs: the deterministic intake zip
 corpus = "corpus"   # generated output (regenerable)
 """
 
 _INTAKE_README = """\
 # Intake
 
-Drop the source packet here, then build the corpus:
+Drop the deterministic intake zip here. It is the single source of truth —
+produced by `jwogrady/rake` and self-verifying (per-file sha256):
 
-- **`<packet>.zip`** — the downloaded court-record packet (one ZIP of PDFs).
-  Exactly one `*.zip` is expected; pass `--packet` to disambiguate more.
-- **`bundle-boundaries.json`** *(optional)* — curated manual section
-  boundaries (detection Tier 1; always wins). Generate a draft with
-  `lawnlord emit-boundaries`, review it, then save it here under this name.
-- **`corpus-curation.json`** *(optional)* — curated metadata overlay
-  (only whitelisted fields; never overrides generated provenance).
+- **`<case>.zip`** — `schema.json` + `data.json` + `files/` (the filed PDFs) +
+  `pages/` (the captured portal HTML). Exactly one `*.zip` is expected.
 
-Then run `lawnlord build` from the project root. Output lands in the configured
-corpus directory (regenerable — safe to delete and rebuild).
+DuckDB is built from this zip; nothing here is hand-edited.
 """
 
 

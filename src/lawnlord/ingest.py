@@ -1,12 +1,12 @@
 """Ingest a :class:`~lawnlord.workspace.Case` into the DuckDB index.
 
 Populates the docket tables — ``cases``, ``parties``, ``events``, ``images``,
-``image_events`` — straight from the curated intake metadata. An **image** is a
-filed PDF (filings.json's ``image``); the documents *within* each image are the
-corpus index step's job (the ``documents`` table). Identity, dates, docket
-types, and parties come from the JSON; this step never guesses and parses no PDF
-content (it only hashes image bytes so image IDs match the exploder's
-``doc_<sha16>`` scheme).
+``image_events``, ``financials`` — straight from the ``CaseModel`` read from the
+intake zip's ``data.json``. An **image** is a filed PDF; the documents *within*
+each image are the future Exploded view's job. Identity, dates, docket types,
+and parties come from the model; this step never guesses and parses no PDF
+content (it only hashes image bytes, so image IDs are stable content hashes,
+``doc_<sha16>``).
 
 Determinism: every ``created_at`` is the caller-supplied ``generated_at`` (never
 wall-clock), IDs derive from stable inputs, and ingest is drop-and-rebuild for
@@ -21,7 +21,6 @@ import duckdb
 from slugify import slugify
 
 from .hashing import sha256_file
-from .unify import find_gaps, unify
 from .workspace import Case
 
 
@@ -67,9 +66,9 @@ def ingest_case(con: duckdb.DuckDBPyConnection, case: Case, generated_at: str) -
     reported in the returned ``skipped_images`` list rather than inserted
     with a fabricated hash.
     """
-    # Land the unified standard (ISO dates, the full identity facets) — not the
-    # raw parse. The model is the single source; unify is deterministic.
-    model = unify(case.model)
+    # The zip is the deterministic single source; the model is consumed as-is
+    # (no multi-source unification — that was a provider-era concern).
+    model = case.model
     ident = model.identity
     case_id = ident.case_number or case.case_slug
     _clear_case(con, case_id)
@@ -127,12 +126,6 @@ def ingest_case(con: duckdb.DuckDBPyConnection, case: Case, generated_at: str) -
                 "description, amount) VALUES (?, ?, ?, ?, ?)",
                 [case_id, i, t.date, t.description, t.amount],
             )
-
-    for field in find_gaps(model):
-        con.execute(
-            "INSERT INTO case_gaps (case_id, field) VALUES (?, ?)",
-            [case_id, field],
-        )
 
     # Events: keep id -> files so image_events can be linked after images.
     used_event_ids: set[str] = set()
