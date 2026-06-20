@@ -20,6 +20,18 @@ of truth, self-verifying via per-file sha256, with DuckDB built from it **exclus
 record exactly; everything else is additive — and all the additive layers were removed here so they
 can be reimplemented cleanly over the zip (see the [ROADMAP](ROADMAP.md) *Reimplementation backlog*).
 
+### Added
+
+- **`lawnlord import <zip>` — the zip → DuckDB reader** (foundation F1, #92). Extracts a rake intake
+  zip safely, **validates `data.json` against the bundled `schema.json`** (fail loud on drift or on
+  >1 case), maps it into the `CaseModel`, and builds the per-case DuckDB. The DuckDB schema is now the
+  **relational mirror of `data.json`** — seven tables (`cases`, `parties`, `events`, `images`,
+  `image_events`, `financials`, `financial_transactions`); the inherited additive tables
+  (`case_gaps`, `documents`, `chunks`, `extracted_dates`, `knowledge_documents`) and the
+  `cases.confidence` column were dropped. `SCHEMA_VERSION` → 7. Values stored verbatim (typing is a
+  later additive view); deterministic (`generated_at` from the manifest's `capturedAt`). Un-stubs
+  `workspace.Case.from_intake`. New dep: `jsonschema`.
+
 ### Removed
 
 - **Provider adapters** — `ody` / `txe` / `combo` parsing and the `combine` command (`providers.py`,

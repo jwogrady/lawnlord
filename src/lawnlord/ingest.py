@@ -55,7 +55,6 @@ def _clear_case(con: duckdb.DuckDBPyConnection, case_id: str) -> None:
     con.execute("DELETE FROM parties WHERE case_id = ?", [case_id])
     con.execute("DELETE FROM financial_transactions WHERE case_id = ?", [case_id])
     con.execute("DELETE FROM financials WHERE case_id = ?", [case_id])
-    con.execute("DELETE FROM case_gaps WHERE case_id = ?", [case_id])
     con.execute("DELETE FROM cases WHERE id = ?", [case_id])
 
 

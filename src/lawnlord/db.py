@@ -6,13 +6,12 @@ function of the intake zip, fully regenerable. It never authors content.
 if needed) the per-case database file.
 
 Vocabulary (glossary in docs/schema.md): an **image** is a filed PDF (the
-court's leaf); a **document** is a logical document *within* an image (a Motion,
-an Exhibit) surfaced by the future Exploded view. Metadata ingestion populates
-``cases``/``parties``/``events``/``images``/``image_events``/``financials`` (see
-:mod:`lawnlord.ingest`). The ``documents``/``chunks``/``extracted_dates``/
-``knowledge_documents`` tables are **inherited and currently unpopulated** — to
-be re-scoped to the zip's level in the rebuild (see ROADMAP). Entities,
-relationships, and analysis are deferred.
+court's leaf). The schema is the **relational mirror of the zip's** ``data.json``
+— seven tables: ``cases``, ``parties``, ``events``, ``images``, ``image_events``,
+``financials``, ``financial_transactions`` — all populated by
+:mod:`lawnlord.ingest` from the validated ``CaseModel``. The Exploded lens (its
+documents/pages + transcription) and any analysis arrive later as clearly
+additive layers, not in this mirror.
 """
 
 from __future__ import annotations
@@ -21,13 +20,13 @@ from pathlib import Path
 
 import duckdb
 
-# SCHEMA_VERSION is inherited at 6 from before the alpha pivot. Several tables /
-# columns it created — preserved-image pointers and text provenance on chunks
-# (was #31), extracted_dates (#36), and two-sided confidence (#33) — belonged to
-# the now-removed additive layer and are currently unpopulated; the schema will
-# be re-scoped to the zip's level in the rebuild. Per-case DBs are regenerable,
-# so any version change needs no in-place migration.
-SCHEMA_VERSION = 6
+# v7 (alpha pivot): re-scoped to the zip standard — the schema is now exactly the
+# relational mirror of data.json (the seven tables above). The pre-pivot additive
+# tables (case_gaps, documents, chunks, extracted_dates, knowledge_documents) and
+# the cases.confidence scoring column were dropped; they belonged to the removed
+# explosion/reconstruction/confidence layers. Per-case DBs are regenerable, so the
+# bump needs no in-place migration.
+SCHEMA_VERSION = 7
 
 # One statement per table; CREATE ... IF NOT EXISTS keeps apply_schema idempotent.
 _SCHEMA_STATEMENTS = (
@@ -50,7 +49,6 @@ _SCHEMA_STATEMENTS = (
         source_url TEXT,
         last_refreshed TEXT,
         source_note TEXT,
-        confidence DOUBLE,
         created_at TEXT
     )
     """,
@@ -87,13 +85,6 @@ _SCHEMA_STATEMENTS = (
     )
     """,
     """
-    CREATE TABLE IF NOT EXISTS case_gaps (
-        case_id TEXT NOT NULL,
-        field TEXT NOT NULL,
-        PRIMARY KEY (case_id, field)
-    )
-    """,
-    """
     CREATE TABLE IF NOT EXISTS events (
         id TEXT PRIMARY KEY,
         case_id TEXT NOT NULL,
@@ -127,77 +118,6 @@ _SCHEMA_STATEMENTS = (
         image_id TEXT NOT NULL,
         event_id TEXT NOT NULL,
         PRIMARY KEY (image_id, event_id)
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS documents (
-        id TEXT PRIMARY KEY,
-        case_id TEXT NOT NULL,
-        image_id TEXT NOT NULL,
-        document_slug TEXT,
-        document_index INTEGER,
-        title TEXT,
-        source_page_start INTEGER,
-        source_page_end INTEGER,
-        page_count INTEGER,
-        boundary_confidence DOUBLE,
-        detection_tier TEXT,
-        document_family TEXT,
-        needs_review BOOLEAN,
-        confidence DOUBLE,
-        created_at TEXT
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS chunks (
-        id TEXT PRIMARY KEY,
-        case_id TEXT NOT NULL,
-        image_id TEXT NOT NULL,
-        document_id TEXT NOT NULL,
-        text TEXT,
-        page_number INTEGER,
-        source_page_number INTEGER,
-        paragraph_number INTEGER,
-        text_span_start INTEGER,
-        text_span_end INTEGER,
-        extraction_method TEXT,
-        citation_low TEXT,
-        citation_display TEXT,
-        confidence DOUBLE,
-        text_source TEXT,
-        ocr_confidence DOUBLE,
-        page_image_path TEXT,
-        page_image_sha256 TEXT,
-        ai_accessible BOOLEAN,
-        needs_review BOOLEAN,
-        created_at TEXT
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS extracted_dates (
-        id TEXT PRIMARY KEY,
-        case_id TEXT NOT NULL,
-        image_id TEXT NOT NULL,
-        document_id TEXT NOT NULL,
-        source_page_number INTEGER,
-        date TEXT,
-        raw_text TEXT,
-        snippet TEXT,
-        text_span_start INTEGER,
-        text_span_end INTEGER,
-        confidence DOUBLE,
-        source TEXT,
-        needs_review BOOLEAN,
-        created_at TEXT
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS knowledge_documents (
-        id TEXT PRIMARY KEY,
-        case_id TEXT NOT NULL,
-        title TEXT,
-        source_path TEXT,
-        created_at TEXT
     )
     """,
 )
