@@ -10,6 +10,7 @@ at it). OCR runs on the GPU when ``ocr`` is built with ``use_gpu=True``.
 from __future__ import annotations
 
 import json
+import shutil
 from collections import defaultdict
 from pathlib import Path
 
@@ -55,6 +56,12 @@ def emit_compare(
     out_dir = Path(out_dir)
     images_dir = out_dir / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
+    # The original filing PDFs travel with the artifact so Original mode can show
+    # the court's document verbatim (native PDF, selectable text) rather than a
+    # flattened render. Enhanced mode still uses the per-page PNGs for the
+    # image-vs-text compare.
+    filings_dir = out_dir / "filings"
+    filings_dir.mkdir(parents=True, exist_ok=True)
     ocr = ocr if ocr is not None else make_lazy_ocr()
 
     if build:
@@ -117,6 +124,11 @@ def emit_compare(
                 if src is None:
                     src = fitz.open(case.intake_dir / intake_path)
                     src_cache[filename] = src
+                    # Copy the original PDF into the artifact once, so Original
+                    # mode serves the court's own document, not a render of it.
+                    dest = filings_dir / filename
+                    if not dest.exists():
+                        shutil.copyfile(case.intake_dir / intake_path, dest)
                 if 1 <= spn <= src.page_count:
                     _render(src[spn - 1], images_dir / actual_name, dpi)
             declared_by[filename] = declared

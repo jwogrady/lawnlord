@@ -20,6 +20,7 @@ in the sibling modules — this layer only parses args and dispatches.
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 from rich.table import Table
@@ -82,6 +83,33 @@ def _ocr_for(args):
     if getattr(args, "gpu", False):
         return make_lazy_ocr(use_gpu=True)
     return make_lazy_ocr()
+
+
+def _intake_root() -> Path:
+    """Where provider intake folders (ody/txe/combo) live. Configurable so the
+    case data can sit in a **separate repo** or **local in the project**:
+
+    1. ``LAWNLORD_INTAKE`` env var (highest precedence),
+    2. ``lawnlord.toml`` ``[lawnlord] intake`` at the cwd (absolute or relative),
+    3. ``./intake`` (the in-project default).
+    """
+    env = os.environ.get("LAWNLORD_INTAKE")
+    if env:
+        return Path(env).expanduser().resolve()
+    return load_intake(".").intake_dir
+
+
+def _resolve_intake(arg: str) -> Path:
+    """Resolve a provider intake folder from a command argument.
+
+    Accepts an explicit path (used as-is, so existing absolute/relative paths and
+    ``.`` keep working) **or** a bare provider name (``combo``/``ody``/``txe``)
+    resolved under the configured intake root (see :func:`_intake_root`).
+    """
+    p = Path(arg)
+    if p.is_dir():
+        return p.resolve()
+    return (_intake_root() / arg).resolve()
 
 
 def _resolve_source(intake, explicit) -> Path:
@@ -250,6 +278,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_compare.add_argument("--dpi", type=int, default=150, help="Render DPI for the page images")
 
+    p_ocr = sub.add_parser(
+        "ocr-page",
+        help="Re-run OCR on a single page image; print JSON {text, confidence}",
+    )
+    p_ocr.add_argument("image", help="Path to the page image (e.g. a compare artifact PNG)")
+    p_ocr.add_argument(
+        "--gpu", action="store_true", help="Run OCR on the GPU (CUDA) when available"
+    )
+
+    p_ai = sub.add_parser(
+        "ai-page",
+        help="Transcribe + summarize + analyze one page image with Claude; print JSON",
+    )
+    p_ai.add_argument("image", help="Path to the page image (e.g. a compare artifact PNG)")
+    p_ai.add_argument(
+        "--model", default=None, help="Override the model (default: LAWNLORD_AI_MODEL or built-in)"
+    )
+
     p_combine = sub.add_parser(
         "combine",
         help="Compile the ody + txe portal views into one combo provider intake",
@@ -292,7 +338,7 @@ def _main(argv: list[str] | None = None) -> None:
         return
 
     if args.command == "pack":
-        case = Case.from_intake(args.intake)
+        case = Case.from_intake(_resolve_intake(args.intake))
         out_zip = Path(args.output) if args.output else Path.cwd() / f"{case.case_slug}.zip"
         stats = pack_case(case, out_zip)
         table = Table(title="Packed source of truth")
@@ -311,7 +357,7 @@ def _main(argv: list[str] | None = None) -> None:
         return
 
     if args.command == "bundle":
-        case = Case.from_intake(args.intake)
+        case = Case.from_intake(_resolve_intake(args.intake))
         out_zip = (
             Path(args.output) if args.output
             else Path.cwd() / f"{case.case_slug}.bundle.zip"
@@ -339,7 +385,7 @@ def _main(argv: list[str] | None = None) -> None:
         return
 
     if args.command == "assemble":
-        case = Case.from_intake(args.intake)
+        case = Case.from_intake(_resolve_intake(args.intake))
         out_pdf = (
             Path(args.output) if args.output
             else Path.cwd() / f"{case.case_slug}-master.pdf"
@@ -380,7 +426,7 @@ def _main(argv: list[str] | None = None) -> None:
         return
 
     if args.command == "compare":
-        case = Case.from_intake(args.intake, case_dir=args.case_dir)
+        case = Case.from_intake(_resolve_intake(args.intake), case_dir=args.case_dir)
         out = Path(args.out) if args.out else Path(args.case_dir) / "compare"
         console.print(
             f"[bold]Case:[/] {case.case_number}  [dim]building + rendering compare → {out}[/]"
@@ -404,13 +450,37 @@ def _main(argv: list[str] | None = None) -> None:
         )
         return
 
+    if args.command == "ocr-page":
+        # Single-page re-extraction for the reviewer. Emit ONLY JSON on stdout so
+        # the web server can parse it; anything else (warnings) goes to stderr.
+        import json
+
+        from .ocr import ocr_image
+
+        text, confidence = ocr_image(args.image, use_gpu=args.gpu)
+        print(json.dumps({"text": text, "confidence": confidence}))
+        return
+
+    if args.command == "ai-page":
+        # Transcribe + summarize + analyze one page. Emit ONLY JSON on stdout so
+        # the web server can parse it; the engine (and API call) live here.
+        import json
+
+        from .ai import analyze_page
+
+        print(json.dumps(analyze_page(args.image, model=args.model)))
+        return
+
     if args.command == "combine":
-        out = args.out or str(Path(args.ody).resolve().parent / "combo")
+        # ody/txe may be explicit paths or bare provider names under the root.
+        ody = _resolve_intake(args.ody)
+        txe = _resolve_intake(args.txe) if args.txe else None
+        out = args.out or str(ody.parent / "combo")
         console.print(
-            f"[bold]Combining[/] ody[dim]({args.ody})[/] + "
-            f"txe[dim]({args.txe or '—'})[/] → {out}"
+            f"[bold]Combining[/] ody[dim]({ody})[/] + "
+            f"txe[dim]({txe or '—'})[/] → {out}"
         )
-        stats = combine(args.ody, args.txe, out)
+        stats = combine(str(ody), str(txe) if txe else None, out)
         case = Case.from_intake(out, case_dir=".")
         table = Table(title="Combo intake")
         table.add_column("Metric")
@@ -430,7 +500,7 @@ def _main(argv: list[str] | None = None) -> None:
         return
 
     if args.command == "index":
-        case = Case.from_intake(args.intake, case_dir=args.case_dir)
+        case = Case.from_intake(_resolve_intake(args.intake), case_dir=args.case_dir)
         console.print(f"[bold]Case:[/] {case.case_number}  [dim]({case.intake_dir})[/]")
         manual_boundaries = load_manual_boundaries(
             case.intake_dir / "bundle-boundaries.json"

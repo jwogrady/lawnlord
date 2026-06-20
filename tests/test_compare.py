@@ -53,6 +53,8 @@ def test_emit_compare_renders_pages_scores_and_json(tmp_path):
         assert p["declaredPages"] == 2 and p["page"] in (1, 2)
         # "document" is additive (a part/exhibit) — present or null, never the root
         assert p["document"] is None or "title" in p["document"]
+        # Original mode loads the court's PDF itself — it travels with the artifact
+        assert (out / "filings" / p["image"]).exists()
     # output reconciles with the manifest: 2 rendered == 2 declared, no drops
     assert data["integrity"]["ok"] is True and not data["integrity"]["errors"]
     assert data["integrity"]["renderedPages"] == 2

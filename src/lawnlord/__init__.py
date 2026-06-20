@@ -9,6 +9,8 @@ module owns it.
 
 from __future__ import annotations
 
+from .ai import DEFAULT_MODEL as AI_DEFAULT_MODEL
+from .ai import analyze_page
 from .analysis_schema import legal_analysis_placeholders, write_json
 from .archive import inspect_archive, inspect_folder, inspect_source, is_suspicious_entry
 from .assemble import assemble_case
@@ -85,7 +87,7 @@ from .intake import (
     scaffold,
 )
 from .models import PdfEntry, SectionBoundary, unique_slug
-from .ocr import DEFAULT_OCR_DPI, make_lazy_ocr, make_ocr
+from .ocr import DEFAULT_OCR_DPI, make_lazy_ocr, make_ocr, ocr_image
 from .preservation import (
     PRESERVED_LEGAL_FIELDS,
     PRESERVED_REVIEW_METADATA_FIELDS,

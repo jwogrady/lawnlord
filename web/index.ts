@@ -12,11 +12,99 @@ import index from "./index.html";
 // fires up out of the box; point COMPARE_DIR at a real case to review it.
 const COMPARE_DIR = process.env.COMPARE_DIR ?? join(import.meta.dir, "sample");
 const REVIEW_FILE = join(COMPARE_DIR, "review.json");
+// Append-only correction history per page. The original extraction is rev 0
+// (in compare.json, immutable); every re-extraction or human edit appends a new
+// revision here — nothing is ever overwritten. "Current text" is the latest.
+const REVISIONS_FILE = join(COMPARE_DIR, "revisions.json");
+// AI summary + analysis are additive #28 proposals: Pending until a human
+// accepts or declines. Kept separate from the immutable record and corrections.
+const PROPOSALS_FILE = join(COMPARE_DIR, "proposals.json");
+const REPO_ROOT = join(import.meta.dir, "..");
 const PORT = Number(process.env.PORT ?? 4173);
+
+type Revision = {
+	rev: number;
+	text: string;
+	source: string; // ocr | human | revert
+	at: string;
+	note?: string;
+	confidence?: number | null;
+};
 
 async function loadReviews(): Promise<Record<string, unknown>> {
 	const file = Bun.file(REVIEW_FILE);
 	return (await file.exists()) ? await file.json() : {};
+}
+
+async function loadRevisions(): Promise<Record<string, Revision[]>> {
+	const file = Bun.file(REVISIONS_FILE);
+	return (await file.exists()) ? await file.json() : {};
+}
+
+// Append a revision (rev 1, 2, … — rev 0 is the original in compare.json) and
+// return the page's full appended history.
+async function appendRevision(
+	id: string,
+	rev: Omit<Revision, "rev" | "at">,
+): Promise<Revision[]> {
+	const all = await loadRevisions();
+	const hist = all[id] ?? [];
+	all[id] = [
+		...hist,
+		{ ...rev, rev: hist.length + 1, at: new Date().toISOString() },
+	];
+	await Bun.write(REVISIONS_FILE, JSON.stringify(all, null, 2));
+	return all[id];
+}
+
+// Re-run OCR on one page image by shelling out to the Python CLI (the engine
+// lives there). The command prints ONLY JSON on stdout.
+async function reextract(
+	imageRel: string,
+): Promise<{ text: string; confidence: number | null }> {
+	const imgPath = join(COMPARE_DIR, imageRel);
+	const out = await Bun.$`uv run lawnlord ocr-page ${imgPath}`
+		.cwd(REPO_ROOT)
+		.quiet()
+		.text();
+	return JSON.parse(out.trim());
+}
+
+type AiResult = {
+	transcription: string;
+	summary: string;
+	analysis: Record<string, unknown>;
+	model: string;
+};
+
+// Transcribe + summarize + analyze one page with Claude (Python CLI; sends the
+// image to the Anthropic API — needs ANTHROPIC_API_KEY in this server's env).
+async function aiPage(imageRel: string): Promise<AiResult> {
+	const imgPath = join(COMPARE_DIR, imageRel);
+	const out = await Bun.$`uv run lawnlord ai-page ${imgPath}`
+		.cwd(REPO_ROOT)
+		.quiet()
+		.text();
+	return JSON.parse(out.trim());
+}
+
+type Proposal = {
+	status: "pending" | "accepted" | "declined";
+	summary: string;
+	analysis: Record<string, unknown>;
+	model: string;
+	at: string;
+};
+
+async function loadProposals(): Promise<Record<string, Proposal>> {
+	const file = Bun.file(PROPOSALS_FILE);
+	return (await file.exists()) ? await file.json() : {};
+}
+
+async function writeProposal(id: string, p: Proposal): Promise<void> {
+	const all = await loadProposals();
+	all[id] = p;
+	await Bun.write(PROPOSALS_FILE, JSON.stringify(all, null, 2));
 }
 
 const server = Bun.serve({
@@ -34,9 +122,105 @@ const server = Bun.serve({
 		"/api/pages": async () => {
 			const data = await Bun.file(join(COMPARE_DIR, "compare.json")).json();
 			const reviews = await loadReviews();
-			for (const page of data.pages) page.review = reviews[page.id] ?? null;
+			const revisions = await loadRevisions();
+			const proposals = await loadProposals();
+			for (const page of data.pages) {
+				page.review = reviews[page.id] ?? null;
+				page.revisions = revisions[page.id] ?? [];
+				page.proposal = proposals[page.id] ?? null;
+			}
 			data.reviewedCount = Object.keys(reviews).length;
 			return Response.json(data);
+		},
+		// AI pass: transcribe (→ revision) + summarize/analyze (→ proposal).
+		"/api/ai-page": {
+			POST: async (req) => {
+				const { id, image } = (await req.json()) as {
+					id: string;
+					image: string;
+				};
+				try {
+					const ai = await aiPage(image);
+					const history = await appendRevision(id, {
+						text: ai.transcription,
+						source: "ai",
+						note: `AI transcription (${ai.model})`,
+					});
+					const proposal: Proposal = {
+						status: "pending",
+						summary: ai.summary,
+						analysis: ai.analysis,
+						model: ai.model,
+						at: new Date().toISOString(),
+					};
+					await writeProposal(id, proposal);
+					return Response.json({ ok: true, history, proposal });
+				} catch (err) {
+					return Response.json(
+						{ ok: false, error: String(err) },
+						{ status: 500 },
+					);
+				}
+			},
+		},
+		// Accept or decline a page's AI proposal (the #28 human decision).
+		"/api/proposal": {
+			POST: async (req) => {
+				const { id, status } = (await req.json()) as {
+					id: string;
+					status: "pending" | "accepted" | "declined";
+				};
+				const all = await loadProposals();
+				if (!all[id])
+					return Response.json(
+						{ ok: false, error: "no proposal for page" },
+						{ status: 404 },
+					);
+				all[id].status = status;
+				await Bun.write(PROPOSALS_FILE, JSON.stringify(all, null, 2));
+				return Response.json({ ok: true, proposal: all[id] });
+			},
+		},
+		// Re-extract a page's text from its image (appends an `ocr` revision).
+		"/api/extract": {
+			POST: async (req) => {
+				const { id, image } = (await req.json()) as {
+					id: string;
+					image: string;
+				};
+				try {
+					const { text, confidence } = await reextract(image);
+					const history = await appendRevision(id, {
+						text,
+						source: "ocr",
+						confidence,
+						note: "re-extracted from image",
+					});
+					return Response.json({ ok: true, history });
+				} catch (err) {
+					return Response.json(
+						{ ok: false, error: String(err) },
+						{ status: 500 },
+					);
+				}
+			},
+		},
+		// Save a human correction or a revert (appends a revision; never overwrites).
+		"/api/revise": {
+			POST: async (req) => {
+				const { id, text, note, source } = (await req.json()) as {
+					id: string;
+					text: string;
+					note?: string;
+					source?: string;
+				};
+				const history = await appendRevision(id, {
+					text,
+					source: source ?? "human",
+					note: note ?? "",
+				});
+				return Response.json({ ok: true, history });
+			},
 		},
 		"/api/review": {
 			POST: async (req) => {

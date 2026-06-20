@@ -101,6 +101,24 @@ def make_ocr(dpi: int = DEFAULT_OCR_DPI, use_gpu: bool = False) -> OcrFn:
     return ocr
 
 
+def ocr_image(
+    path: str, *, dpi: int = DEFAULT_OCR_DPI, use_gpu: bool = False
+) -> tuple[str, float | None]:
+    """Re-extract text from a single rasterized page image (e.g. a compare
+    artifact PNG) by running OCR on it.
+
+    This backs the reviewer's "re-extract from image" action: it opens the image
+    as a one-page document and runs the same engine the corpus build uses, so an
+    on-demand re-extraction is consistent with the original. Raises a clear error
+    if the optional ``ocr`` extra is missing.
+    """
+    ocr = make_ocr(dpi=dpi, use_gpu=use_gpu)
+    with fitz.open(path) as doc:
+        if doc.page_count == 0:
+            return "", None
+        return ocr(doc[0])
+
+
 def make_lazy_ocr(dpi: int = DEFAULT_OCR_DPI, use_gpu: bool = False) -> OcrFn:
     """An OCR backend that builds its engine **lazily** — only when the first
     image-only (text-less) page is actually encountered — and **degrades

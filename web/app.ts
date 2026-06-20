@@ -16,6 +16,17 @@ type Review = {
 type Filing = { title: string; type: string; date: string };
 type DocPart = { title: string; family: string } | null;
 
+// Append-only correction history. rev 0 is the original extraction (immutable,
+// from compare.json); each entry here is a re-extraction or human edit.
+type Revision = {
+	rev: number;
+	text: string;
+	source: string; // ocr | human | revert
+	at: string;
+	note?: string;
+	confidence?: number | null;
+};
+
 type Page = {
 	id: string;
 	filing: Filing;
@@ -32,7 +43,27 @@ type Page = {
 	score: number; // lawnlord confidence, 0..1
 	note: string;
 	review: Review;
+	revisions: Revision[]; // corrections appended after rev 0 (the original)
+	proposal: Proposal; // AI summary + analysis, #28: pending until accept/decline
 };
+
+// AI summary + analysis as a #28 proposal — additive, never overwrites the
+// record; the human accepts or declines it.
+type Analysis = {
+	docType?: string;
+	parties?: string[];
+	dates?: string[];
+	amounts?: string[];
+	keyPoints?: string[];
+	flags?: string[];
+};
+type Proposal = {
+	status: "pending" | "accepted" | "declined";
+	summary: string;
+	analysis: Analysis;
+	model: string;
+	at: string;
+} | null;
 
 type Integrity = {
 	renderedPages: number;
@@ -86,6 +117,8 @@ let mode: "original" | "enhanced" =
 	(localStorage.getItem("lawnlord-mode") as "original" | "enhanced") ??
 	"enhanced";
 let idx = 0;
+let origImage = ""; // the filing PDF shown in Original mode
+let origPage = 1; // which page of that PDF the viewer is parked on
 
 function esc(s: string): string {
 	return (s ?? "").replace(
@@ -97,6 +130,21 @@ function esc(s: string): string {
 
 function reviewedCount(): number {
 	return data.pages.filter((p) => p.review?.reviewed).length;
+}
+
+// The full revision chain for a page: rev 0 is the original extraction (from
+// compare.json), followed by every appended correction. The last entry is current.
+function allRevisions(p: Page): Revision[] {
+	return [
+		{
+			rev: 0,
+			text: p.text,
+			source: p.textSource || "original",
+			at: "",
+			note: "original extraction",
+		},
+		...(p.revisions ?? []),
+	];
 }
 
 // One group per filed image (case → filing → image). Each carries the rendered
@@ -162,6 +210,49 @@ function renderModeToggle(): void {
 	}
 }
 
+// The AI panel: a button to run the pass, and (once run) the summary + analysis
+// as a proposal the human accepts or declines. The transcription it produces
+// lands in the revision history (source "ai"), not here.
+function renderAiPanel(p: Page): string {
+	const pr = p.proposal;
+	const list = (label: string, items?: string[]) =>
+		items && items.length
+			? `<div class="arow"><span class="alabel">${label}</span><span class="aval">${items.map((x) => esc(x)).join(" · ")}</span></div>`
+			: "";
+	if (!pr) {
+		return `<section class="ai">
+      <div class="ai-h">AI — transcribe · summarize · analyze</div>
+      <button id="analyze" class="ai-run">✨ Analyze this page with AI</button>
+      <span id="aistate" class="savestate"></span>
+    </section>`;
+	}
+	const a = pr.analysis ?? {};
+	const badge =
+		pr.status === "accepted"
+			? `<span class="pstat ok">✓ accepted</span>`
+			: pr.status === "declined"
+				? `<span class="pstat no">✗ declined</span>`
+				: `<span class="pstat pend">proposal · pending</span>`;
+	return `<section class="ai ${pr.status}">
+    <div class="ai-h">AI summary + analysis ${badge}<span class="aimodel">${esc(pr.model)}</span></div>
+    <div class="asum">${esc(pr.summary)}</div>
+    <div class="ameta">
+      ${list("type", a.docType ? [a.docType] : [])}
+      ${list("parties", a.parties)}
+      ${list("dates", a.dates)}
+      ${list("amounts", a.amounts)}
+      ${a.keyPoints?.length ? `<div class="arow"><span class="alabel">key points</span><ul class="apts">${a.keyPoints.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>` : ""}
+      ${a.flags?.length ? `<div class="arow"><span class="alabel">flags</span><ul class="apts flags">${a.flags.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>` : ""}
+    </div>
+    <div class="actions">
+      <button id="accept" class="primary"${pr.status === "accepted" ? " disabled" : ""}>accept</button>
+      <button id="decline"${pr.status === "declined" ? " disabled" : ""}>decline</button>
+      <button id="reanalyze">⟳ re-analyze</button>
+      <span id="aistate" class="savestate"></span>
+    </div>
+  </section>`;
+}
+
 function render(): void {
 	renderModeToggle();
 	if (mode === "original") {
@@ -171,62 +262,65 @@ function render(): void {
 	renderEnhanced();
 }
 
-// ORIGINAL — the court's register of actions, verbatim, plus the filed page
-// (the court's own document). No text, scores, parts, or reconstruction.
+// ORIGINAL — the court's register of actions, verbatim, alongside the court's
+// own filing as a native PDF (selectable text, real paging) — not a render of
+// it. No extracted text, scores, parts, or reconstruction.
 function renderOriginal(): void {
 	const m = manifest;
 	progressEl.textContent = `${m.registerOfActions.length} docket entries · ${m.case}`;
-	const filings = filingGroups();
-	const curImg = data.pages[idx]?.image;
+	// the filings the court actually has documents for, in docket order
+	const withDoc = m.registerOfActions.filter((e) => e.filing);
+	if (!origImage && withDoc[0]?.filing) origImage = withDoc[0].filing.image;
+	const cur = withDoc.find((e) => e.filing?.image === origImage);
 	const roa = m.registerOfActions
 		.map((e) => {
 			const f = e.filing;
-			const target = f ? filings.find((g) => g.image === f.image) : undefined;
-			const first = target ? target.first : -1;
-			const isCur = !!f && f.image === curImg;
+			const isCur = !!f && f.image === origImage;
 			const badge = e.type ? `<span class="fam">${esc(e.type)}</span>` : "";
 			const pp = f ? `${f.declaredPages} pp` : "no document";
 			const title = f ? esc(f.title) : esc(e.description || e.type);
-			return `<button class="docitem${isCur ? " cur" : ""}" data-first="${first}"${first < 0 ? " disabled" : ""}>
+			return `<button class="docitem${isCur ? " cur" : ""}" data-image="${f ? esc(f.image) : ""}"${f ? "" : " disabled"}>
         <span class="doctitle"><span class="docn">${esc(e.date)}</span> ${title}</span>
         <span class="docmeta">${badge}${pp}${e.party ? ` · ${esc(e.party)}` : ""}</span>
       </button>`;
 		})
 		.join("");
-	const p = data.pages[idx];
-	const viewer = p
-		? `<section class="score-bar"><span class="doc">${esc(p.filing.title)}</span>
-        <span class="pageid">${esc(p.image)} · p.${p.page} of ${p.actualPages ?? "?"}</span></section>
-      <section class="single"><figure><figcaption>FILED PAGE — original (court record)</figcaption>
-        <img src="${p.actual}" alt="filed page" /></figure></section>
-      <section class="review"><div class="actions">
-        <button id="prev"${idx === 0 ? " disabled" : ""}>‹ prev</button>
-        <button id="next"${idx === data.pages.length - 1 ? " disabled" : ""}>next ›</button>
-      </div></section>`
+	const pp = cur?.filing?.declaredPages ?? 0;
+	if (origPage > pp) origPage = 1;
+	// one pill per declared PDF page — clicking parks the viewer on that page
+	const pagePills =
+		pp > 0
+			? `<div class="pages">${Array.from(
+					{ length: pp },
+					(_, i) =>
+						`<button class="pageitem${i + 1 === origPage ? " cur" : ""}" data-page="${i + 1}">p.${i + 1}</button>`,
+				).join("")}</div>`
+			: "";
+	const viewer = cur?.filing
+		? `<section class="score-bar"><span class="doc">${esc(cur.filing.title)}</span>
+        <span class="pageid">${esc(cur.filing.image)} · ${cur.filing.declaredPages} pp · filed ${esc(cur.date)}</span></section>
+      ${pagePills}
+      <section class="single"><figcaption>FILED DOCUMENT — original (court record)</figcaption>
+        <iframe class="pdf" src="/filings/${encodeURIComponent(cur.filing.image)}#page=${origPage}&view=FitH" title="${esc(cur.filing.title)}"></iframe></section>`
 		: `<section class="score-bar"><span class="note">Select a filing from the register.</span></section>`;
 	app.innerHTML = `<aside class="docs"><div class="docs-h">Register of actions — ${esc(m.case)}</div>${roa}</aside>
     <section class="pane">${viewer}</section>`;
 	for (const el of app.querySelectorAll(".docitem")) {
 		(el as HTMLButtonElement).onclick = () => {
-			const f = Number((el as HTMLElement).dataset.first);
-			if (f >= 0) {
-				idx = f;
+			const image = (el as HTMLElement).dataset.image;
+			if (image) {
+				origImage = image;
+				origPage = 1; // new filing → back to its first page
 				render();
 			}
 		};
 	}
-	const prev = document.getElementById("prev") as HTMLButtonElement | null;
-	const next = document.getElementById("next") as HTMLButtonElement | null;
-	if (prev)
-		prev.onclick = () => {
-			if (idx > 0) idx--;
+	for (const el of app.querySelectorAll(".pageitem")) {
+		(el as HTMLButtonElement).onclick = () => {
+			origPage = Number((el as HTMLElement).dataset.page);
 			render();
 		};
-	if (next)
-		next.onclick = () => {
-			if (idx < data.pages.length - 1) idx++;
-			render();
-		};
+	}
 }
 
 function renderEnhanced(): void {
@@ -293,6 +387,25 @@ function renderEnhanced(): void {
 						: ""
 				}`
 			: `p.${p.page}`;
+
+	// the correction chain — rev 0 (original) then every appended edit/re-extract
+	const revs = allRevisions(p);
+	const curRev = revs[revs.length - 1];
+	const fmtAt = (s: string) => (s ? s.slice(0, 16).replace("T", " ") : "");
+	const history = revs
+		.map((r) => {
+			const isCur = r.rev === curRev.rev;
+			const conf =
+				r.confidence != null
+					? ` · ${Math.round(r.confidence * 100)}% conf`
+					: "";
+			const meta = `rev ${r.rev} · ${esc(r.source)}${r.at ? ` · ${esc(fmtAt(r.at))}` : ""}${r.note ? ` · ${esc(r.note)}` : ""}${conf}`;
+			const action = isCur
+				? `<span class="revcur">current</span>`
+				: `<button class="revert" data-rev="${r.rev}">revert</button>`;
+			return `<div class="rev${isCur ? " cur" : ""}"><span class="revmeta">${meta}</span>${action}</div>`;
+		})
+		.join("");
 	app.innerHTML = `
     <aside class="docs">
       <div class="docs-h">Case contents — ${esc(data.case)}</div>
@@ -309,14 +422,21 @@ function renderEnhanced(): void {
       <section class="compare">
         <figure><figcaption>FILED PAGE — original</figcaption><img src="${p.actual}" alt="filed page" /></figure>
         <figure class="textfig">
-          <figcaption>OUR TEXT${p.textSource ? ` — ${esc(p.textSource)}` : ""}${
+          <figcaption>OUR TEXT — ${esc(curRev.source)}${curRev.rev ? ` (rev ${curRev.rev})` : ""}${
 						data.masterPdf
 							? ` · <a href="/${esc(data.masterPdf)}#page=${p.masterPage}" target="_blank" rel="noopener">reconstructed PDF ↗</a>`
 							: ""
 					}</figcaption>
-          <div class="textpane">${p.text ? esc(p.text) : '<span class="empty">— no text extracted on this page —</span>'}</div>
+          <textarea id="textedit" class="textedit" spellcheck="false">${esc(curRev.text)}</textarea>
+          <div class="textctl">
+            <button id="reextract">⟳ re-extract from image</button>
+            <button id="savetext">save correction</button>
+            <span id="savestate" class="savestate"></span>
+          </div>
+          <details class="revs"><summary>revision history (${revs.length})</summary>${history}</details>
         </figure>
       </section>
+      ${renderAiPanel(p)}
       <section class="review">
         <label class="rng">
           <span class="bad">bad</span>
@@ -358,6 +478,100 @@ function wire(p: Page, myScore: number): void {
 		};
 	}
 	document.querySelector(".pageitem.cur")?.scrollIntoView({ block: "nearest" });
+
+	// correction loop: re-extract from the image, save a human edit, or revert —
+	// each POSTs and appends a revision; nothing is overwritten.
+	const editEl = document.getElementById("textedit") as HTMLTextAreaElement;
+	const stateEl = document.getElementById("savestate") as HTMLElement;
+	async function applyRevisions(history: Revision[]): Promise<void> {
+		p.revisions = history;
+		render();
+	}
+	(document.getElementById("reextract") as HTMLButtonElement).onclick =
+		async () => {
+			stateEl.textContent = "extracting…";
+			const res = await fetch("/api/extract", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ id: p.id, image: p.actual }),
+			});
+			const out = await res.json();
+			if (!out.ok) {
+				stateEl.textContent = `re-extract failed: ${out.error ?? "error"}`;
+				return;
+			}
+			await applyRevisions(out.history);
+		};
+	(document.getElementById("savetext") as HTMLButtonElement).onclick =
+		async () => {
+			const res = await fetch("/api/revise", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ id: p.id, text: editEl.value }),
+			});
+			await applyRevisions((await res.json()).history);
+		};
+	for (const el of document.querySelectorAll(".revert")) {
+		(el as HTMLButtonElement).onclick = async () => {
+			const rev = Number((el as HTMLElement).dataset.rev);
+			const target = allRevisions(p).find((r) => r.rev === rev);
+			if (!target) return;
+			const res = await fetch("/api/revise", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({
+					id: p.id,
+					text: target.text,
+					source: "revert",
+					note: `reverted to rev ${rev}`,
+				}),
+			});
+			await applyRevisions((await res.json()).history);
+		};
+	}
+
+	// AI pass: run / accept / decline. Transcription appends to history; the
+	// summary + analysis are a proposal the human decides on.
+	const aiState = document.getElementById("aistate") as HTMLElement | null;
+	async function runAi(): Promise<void> {
+		if (aiState) aiState.textContent = "analyzing… (sends the page to the API)";
+		const res = await fetch("/api/ai-page", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ id: p.id, image: p.actual }),
+		});
+		const out = await res.json();
+		if (!out.ok) {
+			if (aiState) aiState.textContent = `AI failed: ${out.error ?? "error"}`;
+			return;
+		}
+		p.revisions = out.history;
+		p.proposal = out.proposal;
+		render();
+	}
+	const analyzeBtn = document.getElementById("analyze");
+	if (analyzeBtn) (analyzeBtn as HTMLButtonElement).onclick = runAi;
+	const reanalyzeBtn = document.getElementById("reanalyze");
+	if (reanalyzeBtn) (reanalyzeBtn as HTMLButtonElement).onclick = runAi;
+	async function decide(status: "accepted" | "declined"): Promise<void> {
+		const res = await fetch("/api/proposal", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ id: p.id, status }),
+		});
+		const out = await res.json();
+		if (out.ok) {
+			p.proposal = out.proposal;
+			render();
+		}
+	}
+	const acceptBtn = document.getElementById("accept");
+	if (acceptBtn)
+		(acceptBtn as HTMLButtonElement).onclick = () => decide("accepted");
+	const declineBtn = document.getElementById("decline");
+	if (declineBtn)
+		(declineBtn as HTMLButtonElement).onclick = () => decide("declined");
+
 	(document.getElementById("prev") as HTMLButtonElement).onclick = () => {
 		if (idx > 0) idx--;
 		render();
