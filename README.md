@@ -2,43 +2,54 @@
 
 # lawnlord
 
-*Ingest a case's filings and sort them into the schema you need to analyze the case — and fight it. Verifiable, and traceable to the source.*
+*Mirror a court case from its deterministic export, then build the views you need to read it and fight it — verifiable, and traceable to the source.*
 
-![version](https://img.shields.io/badge/version-0.3.0-blue)
 ![python](https://img.shields.io/badge/python-3.13%2B-blue)
-![tests](https://img.shields.io/badge/tests-174%20passing-brightgreen)
-![status](https://img.shields.io/badge/status-alpha-orange)
+![tests](https://img.shields.io/badge/tests-27%20passing-brightgreen)
+![status](https://img.shields.io/badge/status-alpha%20rebuild-orange)
 ![license](https://img.shields.io/badge/license-proprietary-red)
 
-A local-first **legal case-understanding engine**. It **ingests a case's filings** (from one or both
-court portals) and **sorts them into the schema you need to analyze the case and fight it** — case →
-parties/events → filed images → the documents and exhibits within them — a verifiable, searchable
-substrate where every conclusion traces back to a real source page.
+A local-first **legal case-understanding engine**. Its single source of truth is the **deterministic
+intake zip** produced by [`jwogrady/rake`](https://github.com/jwogrady) — a reproducible scrape of
+the court portal (`schema.json` + `data.json` + `files/` + `pages/`), self-verifying via per-file
+sha256. lawnlord builds a queryable index **from that zip exclusively** and reproduces the views the
+zip's pages already contain.
 
-It is **not** a PDF splitter. lawnlord mirrors the court's filed record *exactly*, extracts every
-page to searchable text, and **proves** the result is lossless against the originals — so every
-downstream conclusion traces back to a real source page.
+The governing principle is unchanged: **mirror the court's record exactly as the immutable base, then
+everything else is additive** — no analysis or overlay may ever alter the mirrored record or its
+provenance.
 
-📖 **Why this exists →** [`docs/motivation.md`](docs/motivation.md)
+> **Status: alpha — mid-rebuild.** The project is being re-founded on the zip standard. The previous
+> implementation (the document exploder, master-PDF reconstruction, the Claude analysis layer, and the
+> first-generation web reviewer) was deliberately removed so it can be reimplemented cleanly on top of
+> a verified foundation. The pre-teardown snapshot is preserved on the **`alpha`** branch. See
+> [CHANGELOG.md](CHANGELOG.md) for what changed and [ROADMAP.md](ROADMAP.md) for what's next.
 
-> **Status:** installable CLI, shipped through **v0.3.0**. Where we've been —
-> [CHANGELOG.md](CHANGELOG.md); where we're going — [ROADMAP.md](ROADMAP.md).
+## Where it's going
 
-## What it produces
+Two foundational views over the zip come first (see the [ROADMAP](ROADMAP.md)):
 
-`lawnlord bundle` wraps a complete case into one self-contained, cross-linked zip:
+1. **Actual view — "as if logged into Odyssey."** The case header, parties, and register of actions
+   as a sortable/filterable case-history table; each filing opens as its **native PDF**. It ends at
+   the image — for visually verifying the mirror matches the portal.
+2. **Exploded view — inside each filed PDF.** Case → filing → image → page, with each page
+   transcribed from a PNG render via AI (not OCR), shown beside the page image.
 
-```text
-case.json              standard metadata wrapper — read this, reach everything
-filings/               preserved original PDFs, hash-pinned (the source of truth)
-case-master.pdf        the whole case reassembled in docket order — text- & visual-lossless
-pages/                 per-page extracted text (searchable, OCR'd when scanned)
-lawnlord.duckdb        the queryable index (case → event → image → document → page)
-bundle-manifest.json   cross-links: image ↔ its pages ↔ master-PDF pages ↔ filing
-```
+Everything beyond these — cross-referencing, case linking, argument tagging, the analytical lenses —
+builds on that substrate and is sequenced in the ROADMAP.
 
-Proven on a real case: **22 filed images → one 255-page master PDF**, every page traceable to its
-source image and page, text- and visual-lossless.
+## What's in the repo today
+
+A stripped, importable foundation (the zip-view "studs"):
+
+- **`models.py`** — the `CaseModel` data contract the zip reader will populate (case → parties →
+  events → documents), plus pure helpers (`case_slug`, `is_suspicious_entry`).
+- **`db.py`** — the per-case DuckDB index (idempotent, versioned schema).
+- **`ingest.py`** — map a `CaseModel` into the DuckDB docket tables (cases, parties, events, images,
+  image↔event links, financials).
+- **`intake.py`** — the intake-folder contract (the deterministic zip) + `lawnlord start` scaffold.
+- **`workspace.py`** — the resolved `Case` (its model + output paths). `from_intake` is a stub
+  awaiting the zip → `CaseModel` reader (the next branch).
 
 ## Install
 
@@ -50,85 +61,64 @@ uv add lawnlord                      # as a project dependency
 
 ## Usage
 
-lawnlord operates on an **intake folder** — a provider folder (e.g. `intake/combo`) holding the
-case JSON plus its `filings/`, with generated output written alongside.
-
 ```bash
-lawnlord start [root]                # scaffold intake/ + lawnlord.toml + an intake README
-lawnlord report [root]               # read-only archive/section report; never writes
-lawnlord build [root]                # explode the corpus from the intake packet
-lawnlord build [root] --force        # rebuild (preserves reviewed analysis)
-lawnlord emit-boundaries [root]      # write a reviewable manual-boundary draft
-lawnlord index [intake]              # explode a provider intake's filings + index into DuckDB
-lawnlord pack [intake]               # package the source of truth: case.json + all filings in one zip
-lawnlord assemble [intake]           # reassemble images into one master PDF (lossless round-trip proof)
-lawnlord bundle [intake]             # the capstone: case wrapped with metadata + master + pages + index
-lawnlord query [--case-dir DIR] --text "…"   # read-only full-text search over the index (with provenance)
+lawnlord start [root]    # scaffold intake/ + lawnlord.toml + an intake README
 ```
 
-`build`/`report`/`emit-boundaries` take `--packet` to point at a specific ZIP. `index`/`pack`/
-`assemble`/`bundle` take a provider **intake folder** (`[intake]`); `query` reads the built
-`lawnlord.duckdb` under `--case-dir`. `python -m lawnlord …` works as an alternative to the console
-script.
+The intake location is configurable so case data can live in a **separate repo** or **local in the
+project**, resolved in this order: the `LAWNLORD_INTAKE` env var → `lawnlord.toml`'s `[lawnlord]
+intake` → `./intake`. `python -m lawnlord …` works as an alternative to the console script.
 
 ### Intake layout
 
 ```text
 <root>/
-  lawnlord.toml      # optional config: intake/corpus dir names
-  intake/            # inputs: the packet ZIP + optional curated files
-    <packet>.zip
-    bundle-boundaries.json   (optional — manual section boundaries, Tier 1)
-    corpus-curation.json     (optional — curated metadata overlay)
-  corpus/            # generated output (regenerable)
+  lawnlord.toml          # optional config: intake/corpus dir names
+  intake/
+    <case>.zip           # the deterministic rake export (the single source of truth)
+  corpus/                # generated output (regenerable)
+```
+
+The zip itself contains:
+
+```text
+data.json      the case record (case → documents → register of actions → parties → financial)
+schema.json    the JSON Schema describing data.json
+manifest.json  per-file sha256 + source URLs + capture metadata
+files/         the filed PDFs (doc-<id>.pdf)
+pages/         the captured portal HTML (CaseDetail.html, CaseDocuments.html)
 ```
 
 ## What's guaranteed
 
-- **Mirror exactly, then add.** lawnlord reproduces the court's filed structure as the **immutable
-  record**; all analysis is *additive* and can never alter generated provenance — hashes, page
-  ranges, slugs, boundary tier/confidence, paths, or citations.
-- **Human-owned legal conclusions.** Page-analysis fields are never pre-filled. The tool surfaces
-  and *proposes*; the human decides.
-- **Deterministic & regenerable.** Boundary detection is a four-tier, confidence-scored process
-  (manual → bookmarks → heading scan → fallback); the index and bundle are pure functions of the
-  intake — nothing is authored in place.
+- **Deterministic source of truth.** The intake zip is reproducible and self-verifying (per-file
+  sha256); DuckDB is a derived, regenerable function of it and never authors content.
+- **Mirror exactly, then add.** lawnlord reproduces the court's record as the **immutable record**;
+  all analysis is *additive* and can never alter the mirrored record or its provenance.
+- **Human-owned legal conclusions.** The tool surfaces and *proposes*; the human decides. Legal
+  conclusions are never machine-rendered.
 
 ## Development
 
 ```bash
-uv run pytest                        # characterization + end-to-end suite (174 tests)
+uv run pytest                        # characterization suite (27 tests)
 ```
 
-The tests are **characterization tests**: they pin current behavior, so a failing test is a
-behavior change to approve by hand, not to silently update.
+The tests are **characterization tests**: they pin current behavior, so a failing test is a behavior
+change to approve by hand, not to silently update.
 
 ## Documentation
 
-This README is the project's homepage and present state. The documents below are the project's
-standards and code summaries — each is kept current or deleted when no longer relevant.
-
-**How we work**
-- [`docs/contributing.md`](docs/contributing.md) — the doc model, conventions, and non-negotiable engineering invariants.
-
-**Code summaries** (provable by reading the source)
-- [`docs/architecture.md`](docs/architecture.md) — modules, data flow, the DuckDB schema, enforced invariants.
-- [`docs/schema.md`](docs/schema.md) — the canonical `case.json` + DuckDB schema as implemented.
+- [`docs/motivation.md`](docs/motivation.md) — the problem, the solution, and how you use it.
+- [`docs/architecture.md`](docs/architecture.md) — modules, data flow, the DuckDB schema, invariants.
+- [`docs/schema.md`](docs/schema.md) — the zip's `data.json` standard + the DuckDB schema.
 - [`docs/ux.md`](docs/ux.md) — the CLI and user-facing behavior.
-
-**Why & how you use it**
-- [`docs/motivation.md`](docs/motivation.md) — the problem, the solution, and how you use it and benefit.
-
-**Brand**
-- [`docs/brand/brand-guide.md`](docs/brand/brand-guide.md) — the brand kit: palette, shadcn/ui tokens, Tailwind preset, Google Fonts, swatch sheet, and a PDF guide.
-
-**Plan & history**
-- [`ROADMAP.md`](ROADMAP.md) — where we're going. The plan is the [GitHub issues](https://github.com/jwogrady/lawnlord/issues) assigned to each milestone; the roadmap narrates them.
-- [`CHANGELOG.md`](CHANGELOG.md) — where we've been.
+- [`docs/contributing.md`](docs/contributing.md) — the doc model, conventions, and engineering invariants.
+- [`docs/brand/brand-guide.md`](docs/brand/brand-guide.md) — palette, tokens, fonts, swatch sheet.
+- [`ROADMAP.md`](ROADMAP.md) — where we're going · [`CHANGELOG.md`](CHANGELOG.md) — where we've been.
 
 ## License
 
 Proprietary — © 2026 jwogrady. **All rights reserved.** This repository is published for reference
 and transparency only; no permission is granted to use, copy, modify, or distribute the software or
-its source. See [`LICENSE`](LICENSE). (The most restrictive license stands until the project is
-opened to contributors or release.)
+its source. See [`LICENSE`](LICENSE).

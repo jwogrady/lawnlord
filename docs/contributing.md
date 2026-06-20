@@ -77,21 +77,24 @@ contributors or released.
 
 These hold for every code change:
 
-- **Mirror the court's filed schema exactly.** That record is the immutable **"what is" map**.
+- **The deterministic zip is the single source of truth.** The `rake` export (`schema.json` +
+  `data.json` + `files/` + `pages/`) is reproducible and self-verifying (per-file sha256); same input
+  → same bytes. DuckDB is built **from it exclusively**.
+- **Mirror the court's record exactly.** That mirrored record is the immutable **"what is" map**.
 - **Everything else is additive.** No analysis, proposal, overlay, or verdict may mutate the
-  mirrored record or any generated provenance — hashes, page ranges, slugs, boundary
-  tier/confidence, paths, or citations. The curation whitelist (`curation.ALLOWED_CURATED_FIELDS`)
-  is the only chokepoint.
-- **Two inputs, kept separate:** the **case decomposition** (the "what is" map, derived from the
-  court record) vs the **knowledge base** (curated external context the *user* supplies — links,
-  JSON, PDFs). Analysis reasons over the case map *in the context of* the knowledge base.
+  mirrored record or its provenance (sha256s, paths, page counts). The zip is the chokepoint —
+  nothing is authored in place.
+- **Two inputs, kept separate:** the **case** (the "what is" map, derived from the court record) vs
+  the **knowledge base** (curated external context the *user* supplies — links, JSON, PDFs).
+  Analysis reasons over the case *in the context of* the knowledge base.
 - **The timeline is derived from what *is*** — filing dates (the record) + court rules/statutes (the
   knowledge base) → computed deadlines, each citing its rule. Never from user-entered dates.
-- **Reconstructable text is the readiness gate.** No analysis begins until every page round-trips
-  text + image from the data and clears confidence against both intake sources.
+- **Verify the foundation before analyzing.** The two foundational views (Actual, Exploded) — the
+  mirror confirmed against the portal and every page transcribed — are the readiness gate; no
+  analysis begins until they hold.
 - **The tool proposes; the human decides.** Legal conclusions are never machine-rendered. Analysis
   is accept/decline — `pending` until a human accepts it; only `accepted` is treated as truth.
-- **The DuckDB index is a derived, regenerable function** of the intake + corpus. The database never
+- **The DuckDB index is a derived, regenerable function** of the intake zip. The database never
   authors content.
 
 ## How work flows

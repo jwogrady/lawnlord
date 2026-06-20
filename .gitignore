@@ -15,6 +15,10 @@ dist/
 # uv
 # (uv.lock is committed; the environment is not)
 
+# Local Claude Code state (settings, scheduled tasks, session memory) — never
+# committed; memory lives in the user's ~/.claude, not the tool repo.
+.claude/
+
 # Case-specific intake materials never live in the tool repo — they belong in
 # the case archive repo (e.g. ../gcp-hoa-case/intake/<provider>/). Tests use
 # hermetic tmp_path fixtures, not committed case data.

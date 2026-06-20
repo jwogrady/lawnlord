@@ -1,18 +1,18 @@
-"""DuckDB index for the ``case -> event -> image -> document -> page`` model.
+"""DuckDB index for the case record read from the deterministic intake zip.
 
 This is the **only SQL site**. The database is a derived index — a pure
-function of the intake JSON plus the exploded corpus, fully regenerable. It
-never authors content. ``apply_schema`` is idempotent and versioned;
-``open_case_db`` opens (creating if needed) the per-case database file.
+function of the intake zip, fully regenerable. It never authors content.
+``apply_schema`` is idempotent and versioned; ``open_case_db`` opens (creating
+if needed) the per-case database file.
 
-Vocabulary (source-true; glossary in docs/schema.md): an **image** is a filed PDF
-(Odyssey's own term for it), and a **document** is a logical document *within*
-an image (a Motion, an Exhibit, an Affidavit) — what the exploder detects as a
-boundary section. So ``images`` holds the filed PDFs and ``documents`` holds the
-documents-within; ``chunks`` (one row per page) link to both. Metadata ingestion
-populates ``cases``/``parties``/``events``/``images``/``image_events`` (see
-:mod:`lawnlord.ingest`); ``documents``/``chunks`` come from the corpus index step.
-Entities/relationships/analysis are deferred to later milestones.
+Vocabulary (glossary in docs/schema.md): an **image** is a filed PDF (the
+court's leaf); a **document** is a logical document *within* an image (a Motion,
+an Exhibit) surfaced by the future Exploded view. Metadata ingestion populates
+``cases``/``parties``/``events``/``images``/``image_events``/``financials`` (see
+:mod:`lawnlord.ingest`). The ``documents``/``chunks``/``extracted_dates``/
+``knowledge_documents`` tables are **inherited and currently unpopulated** — to
+be re-scoped to the zip's level in the rebuild (see ROADMAP). Entities,
+relationships, and analysis are deferred.
 """
 
 from __future__ import annotations
@@ -21,19 +21,12 @@ from pathlib import Path
 
 import duckdb
 
-# v2: re-leveled documents->images and sections->documents (docs/plans/v0.3.0).
-# v3: landed the standard schema — case identity facets, financials +
-#     financial_transactions, party aliases, and case_gaps.
-# Per-case DBs are regenerable, so the bump needs no in-place migration.
-# v4: chunks carry the page's text provenance (text_source, ocr_confidence) and
-# a pointer to its preserved page image (page_image_path + page_image_sha256),
-# so a page is reconstructable from the data alone (#31).
-# v5: extracted_dates holds date-bearing facts found in page text (#36) — facts,
-# not interpretations; every row is needs_review.
-# v6: two-sided confidence (#33) — chunks carry confidence + ai_accessible +
-# needs_review (scored against Odyssey metadata and the source PDFs), rolled up
-# to documents.confidence and cases.confidence. Per-case DBs are regenerable, so
-# the bumps need no in-place migration.
+# SCHEMA_VERSION is inherited at 6 from before the alpha pivot. Several tables /
+# columns it created — preserved-image pointers and text provenance on chunks
+# (was #31), extracted_dates (#36), and two-sided confidence (#33) — belonged to
+# the now-removed additive layer and are currently unpopulated; the schema will
+# be re-scoped to the zip's level in the rebuild. Per-case DBs are regenerable,
+# so any version change needs no in-place migration.
 SCHEMA_VERSION = 6
 
 # One statement per table; CREATE ... IF NOT EXISTS keeps apply_schema idempotent.

@@ -1,97 +1,69 @@
-# The standard court-record schema (developer code summary)
+# The case-record schema (developer code summary)
 
-> **Provable from the code.** Every field below is what `canonical.to_canonical()` (`canonical.py`)
-> actually produces and what `db.py` actually creates. If this doc and the code disagree, **the code
-> wins.** Below-the-image decomposition and analysis are future work — see the
-> [ROADMAP](../ROADMAP.md).
+> **Provable from the code and the zip.** The intake schema is whatever the zip's own `schema.json`
+> declares over its `data.json`; the in-memory contract is `models.CaseModel`; the index is what
+> `db.py` creates. If this doc and any of those disagree, **they win** — fix the doc. Below-the-image
+> decomposition and analysis are future work — see the [ROADMAP](../ROADMAP.md).
 
-Lawnlord mirrors the court record from the Odyssey (`ody`) and re:SearchTX (`txe`) portals into one
-canonical `case.json`. The two portals are two views of the same record; lawnlord normalizes them
-into one shape and tags which source supplied each field.
+The single source of truth is the **deterministic intake zip** (`rake`). There is no separate
+canonical `case.json` standard anymore — `data.json`, described by the zip's bundled `schema.json`,
+**is** the standard. lawnlord reads that record into a typed `CaseModel` and derives a DuckDB index
+from it.
+
+## The intake zip
+
+```text
+data.json      the case record (array of one case object)
+schema.json    JSON Schema (draft 2020-12) describing data.json — self-describing
+manifest.json  per-file sha256 + source ViewDocumentFragment URLs + capture metadata
+files/         the filed PDFs (doc-<DocumentFragmentID>.pdf)
+pages/         the captured portal HTML (CaseDetail.html, CaseDocuments.html)
+```
+
+`data.json` (top-level keys per case): `caseNumber`, `caseType`, `dateFiled`, `location`, `parties`,
+`financial`, `documents`, `registerOfActions`.
+
+- **`documents[]`** — one filed PDF each: `Image` (title), `Page Count`, `file` (`files/doc-N.pdf`),
+  `date`, `event`, `events[]`. Values are scrape-faithful strings.
+- **`registerOfActions[]`** — `date`, `event`, `section` (`dispositions` | `other events and
+  hearings`), and `documents[]` (file paths joining back to `documents[]`).
+- **`parties[]`** — `name`, `role`, `representation[]`.
+- **`financial`** — `assessedTo`, `balanceAsOf`, `balanceDue`, `totalAssessment`, `totalPayments`,
+  `transactions[]{date, description, amount}` (the plaintiff's court costs, not the owed ledger).
 
 ## Vocabulary
 
-One word — *document* — means different things in different layers; this glossary is canonical, and
-each layer maps to it. (Issue #35.)
+| Term | Meaning |
+|---|---|
+| **case** | the lawsuit |
+| **event** | a docket entry / register-of-actions row |
+| **image** | a **filed PDF** — the court's leaf; the Actual view ends here |
+| **document** | a logical document *within* an image (Motion, Exhibit A…) — surfaced by the future Exploded view, not present in the zip |
+| **page** | a page of a filed PDF |
 
-| Canonical term | Meaning | `case.json` (`canonical.py`) | DuckDB index (`db.py`) | on-disk corpus (`corpus.py`) |
-|---|---|---|---|---|
-| **case** | the lawsuit | `case` | `cases` | `archive` |
-| **event** | a docket entry / filing | `events`, `docket` | `events` | — |
-| **image** | a **filed PDF** (the court's leaf) | `documents[]` ⚠️ | `images` | `submissions/<…>/documents/<…>` |
-| **document** | a logical document *within* an image (Motion, Exhibit A, Affidavit) — `section == document` (#34) | — *(not serialized)* | `documents` | `sections/<…>` |
-| **page** | a page of a document | — | `chunks` (one row per page) | `pages/`, `text/` |
+## The in-memory contract (`models.py`, `CaseModel`)
 
-⚠️ **The collision.** `case.json`'s `documents[]` are the **filed PDFs** — *images* in the index
-vocabulary — **not** the index's `documents` (the logical documents *within* an image). When reading
-`case.json`, treat `documents[]` as images. Renaming `case.json`'s `documents[]` → `images[]` to remove
-the collision outright is a deferred schema change; until then, this mapping is the contract.
+The zip reader (next branch) populates this; `ingest.py` consumes it.
 
-## `case.json` (`schemaVersion` `"2.0"`, `canonical.py`)
+- **`identity`** (`CaseIdentity`) — `case_number`, `title`, `court`, `judicial_officer`, `case_type`,
+  `status`, `date_filed`, `disposition_*`, `citation_number`, `source_url`, … (curated fields the
+  reader lifts from `data.json` + the captured `pages/*.html`).
+- **`parties[]`** (`Party`) — `role`, `name`, `representation`, `location`, `attorneys[]`, `aliases`.
+- **`events[]`** (`Event`) — `date`, `phase`, `event`, `description`, `party`, `files[]`.
+- **`documents[]`** (`DocumentRef`) — `intake_path` (`files/doc-N.pdf`), `filename`, `title`,
+  `declared_page_count`, `docket_event`, `filing_date`.
+- **`financials`** (`Financials`, nullable) and `hearings` / `docket` / `case_flags` /
+  `case_cross_references` / `source_note` carry the remaining structure.
 
-Root keys: `schemaVersion`, `provider`, `case`, `parties`, `financials` (nullable), `hearings`,
-`events`, `docket`, `documents`, `caseFlags`, `caseCrossReferences`, `sourceNote`, plus the derived
-`sources`, `provenance`, and `gaps`.
+## DuckDB index (`db.py`, `SCHEMA_VERSION = 6`)
 
-- **`case`** — `caseNumber`, `title`, `court`, `clerk`, `judicialOfficer`, `caseType`,
-  `caseCategory`, `status`, `dateFiled`, `citationNumber`,
-  `disposition{type, date, comment, judicialOfficer}`, `sourceUrl` (a single URL), `lastRefreshed`.
-- **`parties[]`** — `role`, `name`, `representation`, `location`, `aliases[]`,
-  `attorneys[]{name, number, status, phone}`. (Attorney bar number is the `number` field.)
-- **`financials`** (nullable) — `party`, `assessment`, `payments`, `balanceDue`, `asOf`,
-  `transactions[]{date, description, amount}`.
-- **`hearings[]`** — `dateTime`, `type`, `judge`, `location`, `result`.
-- **`events[]`** (the Odyssey phase-ordered timeline) — `date`, `phase`, `event`, `description`,
-  `party`, `files[]`.
-- **`docket[]`** (the richer re:SearchTX view; combo only) — `date`, `event`, `type`, `comment`,
-  `documents[]{name, pages, file}`.
-- **`documents[]`** (filed PDFs) — `file`, `filename`, `title`, `declaredPageCount`, `docketEvent`,
-  `filingDate`. (No `sha256` / `actualPageCount` here yet — those are exploder/DuckDB-side.)
-
-## Who supplies what (`providers.py`, `unify.py`)
-
-- **Odyssey (base):** identity, parties (role/name/representation/location/attorneys), the timeline
-  `events`, `financials`, and `documents` (from `filings.json`).
-- **re:SearchTX (combo merge):** attorney bar `number` (matched by name), party `aliases`,
-  `caseCategory`, `clerk`, `lastRefreshed`, `hearings`, `docket`, `caseFlags`, `caseCrossReferences`.
-- **Normalization:** dates → ISO (`unify.normalize_date`). Everything else passes through as-is —
-  no status tokenization, no name reformatting, no title trimming. Every field records its source(s)
-  in `sources` / `provenance`; missing standard fields are listed in `gaps`.
-
-## DuckDB index (`db.py`, `SCHEMA_VERSION` 3)
-
-A derived, regenerable index over the same record plus the exploded corpus. Tables: `cases`,
-`parties`, `financials`, `financial_transactions`, `case_gaps`, `events`, `images`, `image_events`,
-`documents`, `chunks` (one row per page; FTS over `text`), and the `knowledge_documents` stub. Read
-`db.py` `_SCHEMA_STATEMENTS` for exact columns.
+A derived, regenerable index over the record. Populated today: `cases`, `parties`, `financials`,
+`financial_transactions`, `events`, `images`, `image_events`. Present but **not yet populated** (to
+be re-scoped to the zip's level): `documents`, `chunks`, `extracted_dates`, `knowledge_documents`.
+Read `db.py` `_SCHEMA_STATEMENTS` for exact columns.
 
 ## Additive-only invariant
 
-The mirrored record and its generated provenance — hashes, page ranges, slugs, boundary
-tier/confidence, paths, and citations — are immutable. The **only** way to add curated metadata is
-the `ALLOWED_CURATED_FIELDS` whitelist (`curation.apply_metadata_overlay`); no overlay, proposal, or
-verdict can change a generated field, and the whitelist itself may never include one. This single
-chokepoint is pinned by `tests/test_schema_levels.py` (#37).
-
-## Below the image: the `document` level — `section == document` (decision, #34)
-
-The image is the court-defined leaf. lawnlord decomposes it into the **documents within an image** —
-the logical filings the exploder detects from bookmarks/headings (a Motion, Exhibit A, an Affidavit).
-This is **one** boundary level, not two: the exploder's on-disk vocabulary calls these boundaries
-"sections," but they are the same thing as the index's `documents`. **`section == document`** — there
-is no separate first-class `section` level, because the data has no sub-document level to model.
-
-- The DuckDB index stores them in `documents` (there is no `sections` table); `chunks` link to
-  `document_id`.
-- The on-disk corpus keeps its `sections/` grouping as an implementation detail, mapped to a
-  `documents` row at the index boundary (`index.py`).
-- **Junk bookmarks are excluded** from the document set: embedded-file/remote targets (page `< 1`),
-  non-top-level (level ≠ 1) entries, and — for the reassembled outline — filename-like or
-  bare-numeric titles (`boundaries.py`, `assemble._is_junk_bookmark`).
-
-Reviving `section` as its own level is deferred unless a real sub-document structure appears; today it
-would be an empty level.
-
-The remaining below-the-image work — per-page text + preserved-image pointers and confidence scored
-against both sources — is the rest of the v0.4.0 chain in the [ROADMAP](../ROADMAP.md). It is additive
-and never alters the mirrored record above.
+The mirrored record — the zip and its provenance (sha256s, paths, page counts) — is immutable.
+Anything lawnlord derives (the DuckDB index, future analysis) is additive and may never alter it. The
+zip is the chokepoint: same input → same bytes, verified against `manifest.json`.

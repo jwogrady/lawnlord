@@ -17,11 +17,12 @@ the case clearly.
 
 ## The solution
 
-Lawnlord ingests your case's filings and **sorts them into the schema you need to analyze the case
-and fight it** — case → parties/events → filed images → the documents and exhibits within them. It
-mirrors the court's filed record exactly, extracts every page to searchable text, and proves the
-result is lossless — so nothing is missed and everything traces back to a real source page. On that trustworthy record it
-helps you answer the questions that decide the case:
+Lawnlord starts from a **deterministic export of your case** — a reproducible, self-verifying scrape
+of the court portal (the `rake` zip) — and **sorts it into the schema you need to analyze the case
+and fight it**: case → parties/events → filed images → (later) the documents within them. It mirrors
+the court's record exactly as the immutable base, so nothing is missed and everything traces back to
+a real source page. On that trustworthy record it helps you answer the questions that decide the
+case:
 
 **What happened? · What can be proven? · What law applies? · What should be done next?**
 
@@ -35,23 +36,22 @@ makes you fast and certain enough to render your own.
 
 ## How you use it
 
-1. **Create the case** and drop your intake (the court export + filings) into its folder.
-2. **Build** — lawnlord explodes every filing into pages, OCRs the scanned ones, and indexes the
-   whole `case → event → image → document → page` model into DuckDB.
-3. **Bundle** — get one self-contained, cross-linked package: the metadata wrapper, the preserved
-   originals, a lossless master PDF, per-page searchable text, and the queryable index.
-4. **Search the record** — full-text search with provenance (`query`): every hit traces to its
-   source page.
-5. **Curate the knowledge base** — add the statutes, rules, and governing documents the case turns
+1. **Create the case** — `lawnlord start` scaffolds the intake folder; drop your deterministic export
+   (the `rake` zip — `data.json` + `files/` + `pages/`) into it.
+2. **Read the case two ways** *(the foundation, in build)* — the **Actual view** reproduces the
+   portal (case header, parties, a sortable/filterable register of actions; each filing opens as its
+   native PDF) so you can verify the mirror matches the court; the **Exploded view** digs inside each
+   filed PDF and transcribes every page (PNG → AI) into searchable text.
+3. **Curate the knowledge base** — add the statutes, rules, and governing documents the case turns
    on, as links / JSON / PDFs.
-6. **Review proposed analysis** — accept or decline machine-proposed facts, deadlines, and grounds;
+4. **Review proposed analysis** — accept or decline machine-proposed facts, deadlines, and grounds;
    only what you accept counts.
-7. **Get the number and the motions** — a defensible "what is actually owed," and grounded motion
+5. **Get the number and the motions** — a defensible "what is actually owed," and grounded motion
    drafts (e.g. to set aside a judgment), every statement traceable to evidence and authority — for
    you to review and file.
 
-Steps 1–4 ship today. The computed deadline **timeline** (filing dates + court rules), the
-**knowledge base** (5), **accept/decline analysis** (6), and the **number + motions** (7) are the
+Today `lawnlord start` scaffolds the intake. The zip → DuckDB reader and the two views (step 2), the
+**knowledge base** (3), **accept/decline analysis** (4), and the **number + motions** (5) are the
 prerequisite chain in the [ROADMAP](../ROADMAP.md) — never from dates you type in.
 
 ## What you get

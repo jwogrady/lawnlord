@@ -70,6 +70,36 @@ See [`CHANGELOG.md`](CHANGELOG.md) for full detail.
 
 Build top to bottom. Each milestone depends on the one above it.
 
+> **Direction change — alpha track (2026-06).** The intake standard is now the **deterministic
+> `rake` zip** (`schema.json` + `data.json` + `files/` + `pages/`): the single source of truth,
+> self-verifying via per-file sha256, with DuckDB built from it **exclusively**. The provider
+> adapters (`ody`/`txe`/`combo`) and the **entire additive layer** — analysis, the Claude page
+> layer, document explosion (boundary detection), master-PDF reconstruction, confidence scoring,
+> curation overlay, review preservation, full-text search, and the compare/review **web app** — were
+> removed to rebuild on a verified foundation. The pre-demolition snapshot is preserved on the
+> **`alpha`** branch. The milestones below are unchanged in *intent*; they are now **rebased** to sit
+> on top of the two foundational views, and their additive pieces will be **reimplemented over the
+> zip** (see *Reimplementation backlog*). The principle is unchanged: mirror exactly, then add.
+
+### Foundation (alpha) — two views over the zip
+*Recreate exactly the views the zip's pages already contain — nothing additive. Each page of the zip
+is the data-view contract. This is the substrate cross-referencing, case linking, and argument
+tagging build on, so it ships first and alone.*
+
+- **Zip → DuckDB reader** — parse `data.json` (validated by `schema.json`) into the `CaseModel`,
+  ingest into DuckDB, extract `files/` safely; replaces the deleted provider adapters
+  (`workspace.from_intake` is currently a stub awaiting this).
+- **Actual view — "as if logged into Odyssey."** A faithful reproduction of the portal: case header
+  (caption, court, judge, status, filed date), parties, and the register of actions as a
+  **sortable / filterable** case-history table (date · type · party · page count · linked doc). Each
+  filing opens as its **native PDF** (selectable text, real paging — *not* a render), with deep-link
+  paging (`#page=N&view=FitH`). **This view ends at the image.** Purpose: visually verify LawnLord
+  matches Odyssey. Optionally render the captured `pages/*.html` for true snapshot parity.
+- **Exploded view — inside each filed PDF.** Navigate case → filing → image → page; transcribe each
+  page from a **PNG render via AI** (not OCR — measured as materially more accurate), shown beside
+  the page image. Surface integrity (rendered vs declared page counts; mismatches flagged, never
+  hidden).
+
 ### v0.4.0 — Canonical "is" layer (the readiness gate)
 [Milestone #2](https://github.com/jwogrady/lawnlord/milestone/2) · *Mirror exactly, extract all text+meta, reconstruct from the data, prove confidence against both sources.*
 
@@ -85,7 +115,8 @@ Build top to bottom. Each milestone depends on the one above it.
 ### v0.4.1 — Compare & review UI
 [Milestone #7](https://github.com/jwogrady/lawnlord/milestone/7) · *Human-in-the-loop review of the is-layer: actual vs reconstructed, page by page, with the reviewer's rating vs lawnlord's score.*
 
-- ✅ Shipped: [#66](https://github.com/jwogrady/lawnlord/issues/66) reviewer UI · [#67](https://github.com/jwogrady/lawnlord/issues/67) `lawnlord compare` emitter · [#68](https://github.com/jwogrady/lawnlord/issues/68) logo.
+> **Removed in the alpha pivot.** The first-generation web app ([#66](https://github.com/jwogrady/lawnlord/issues/66) reviewer UI, [#67](https://github.com/jwogrady/lawnlord/issues/67) `lawnlord compare` emitter) was deleted with the rest of the additive layer; the logo ([#68](https://github.com/jwogrady/lawnlord/issues/68)) survives. The review/compare workflow is **rebased** to be reimplemented on top of the two foundational views — see *Reimplementation backlog* for the patterns worth carrying over.
+
 - [#69](https://github.com/jwogrady/lawnlord/issues/69) — Reviewer: group & navigate by **document/exhibit** (compare at the litigation unit)
 - [#70](https://github.com/jwogrady/lawnlord/issues/70) — Fold **actual-vs-reconstructed fidelity** into the page score (stop the uniform 1.0)
 
@@ -113,6 +144,41 @@ Build top to bottom. Each milestone depends on the one above it.
 - [#43](https://github.com/jwogrady/lawnlord/issues/43) — Generate motions to file: set-aside motion + settlement basis, grounded
 
 ---
+
+## Reimplementation backlog — ideas preserved from the alpha demolition
+
+Good ideas from the removed code (chiefly the first-gen web app), kept so they aren't lost. These
+are **patterns to carry forward**, not live features; they fold into the milestones above as the
+additive layer is rebuilt over the zip.
+
+**Actual-view UX (carry into the Foundation)**
+- **Mode/lens switcher** — the Original vs Enhanced toggle (persisted to `localStorage`); generalize
+  to a lens switcher (Actual → Exploded → later analytical lenses) over the same immutable record.
+- **Register of actions as the case TOC** — a left rail in docket order, each row showing
+  date · type · party · page count, the current filing highlighted; click to open. Becomes the
+  sortable/filterable case-history table.
+- **Native-PDF viewing, not a render** — open the court's actual filed PDF (selectable text, real
+  paging) with deep-link paging (`#page=N&view=FitH`).
+- **Page pills** — one pill per declared page; clicking parks the viewer on that page.
+
+**Exploded-view UX**
+- **Case → filing → image → page rail**, grouping pages under their filed image (`filingGroups`).
+- **Page text beside the page image**, with the text source labelled.
+- **Integrity surfaced, never hidden** — rendered vs declared page counts; mismatches flagged (⚑).
+
+**Additive layers (deferred — reimplement over the zip, per their milestones)**
+- **AI page layer** → v0.4.0/v0.6.0: PNG-render → AI transcription (beats OCR); summary/analysis as
+  **accept/decline proposals** ([#28](https://github.com/jwogrady/lawnlord/issues/28)) that never
+  overwrite the record; transcription lands as a revision, analysis as a pending proposal.
+- **Human review signal** → v0.4.1: rate 0–100 (good–bad), note, flag, mark-reviewed; the **gap vs
+  lawnlord's own score** is the point.
+
+**Engineering patterns worth keeping**
+- **Append-only revision history** — rev 0 is the immutable original; every re-extract / human edit
+  / revert **appends** a revision and never overwrites. Strong, auditable provenance — adopt
+  wherever text gets corrected.
+- **Local single-user server** — Bun + HMR, per-artifact JSON endpoints, additive state (reviews /
+  revisions / proposals) persisted in files **separate** from the immutable record.
 
 ## Long-range vision (beyond the chain)
 
