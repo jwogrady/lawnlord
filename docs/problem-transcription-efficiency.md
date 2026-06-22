@@ -21,6 +21,15 @@ work requires. The current case (`odyssey-250914566`, 255 pages rendered,
 `page_text` empty) has not been transcribed yet — so the cost of the first full
 run, and every experiment after it, lands directly on this pain.
 
+Worse, most of those calls are redundant. A measurement of this case found that
+**20 of 22 filed PDFs (~248 of 255 pages) are born-digital and carry a rich
+embedded text layer**; only 2 PDFs (6 scanned/image-only pages) lack one. For a
+born-digital page the PDF already contains the *exact* text — so the current
+pipeline pays a frontier vision model to re-recognize pixels for text that is
+already present, verbatim, in the file. That is both wasted spend and *worse*
+output (OCR error introduced over ground truth). Re-OCR is only genuinely
+required for the handful of image-only pages.
+
 ## Outcome
 
 Transcription runs **local-first**: a local vision model on the RTX 3080
@@ -51,12 +60,27 @@ layer. "Run it locally" violates nothing.
 5. Output stays **append-only and stably ordered**; the mirror is never written
    by transcribe; cloud stays opt-in (`ANTHROPIC_API_KEY`-gated, now only for
    escalation).
+6. Born-digital pages are transcribed from the **embedded PDF text layer**
+   (`source='pdf_text'`), not a model; only pages without usable embedded text
+   reach the vision tier.
 
 ## Candidate levers, in order of impact
 
 For `plan` to decompose — by expected payoff for *this single case*, not yet a
-tech choice (specific local model/runtime is `plan`'s call).
+tech choice (specific local model/runtime is `plan`'s call). Lever **0** was
+added after the born-digital measurement above; levers 1–5 keep their original
+numbers so the milestone issues' cross-references stay valid.
 
+0. **Extract the embedded PDF text layer first (highest impact for this case).**
+   For the ~248 born-digital pages the PDF already holds the exact text;
+   `pypdfium2` (already a dependency, used in `explode.py`) extracts it for free,
+   deterministically, as ground truth — **not** OCR. A text-layer pre-pass writes
+   those pages straight to `page_text` (`source='pdf_text'`, fidelity `1.0`) and
+   hands only the image-only/thin pages to a vision tier. This collapses the
+   first full run from 255 model calls to ~6 *before* any local/cloud choice, and
+   is strictly more accurate than re-recognizing pixels. It re-ranks ahead of the
+   levers below for born-digital cases; the vision tier then carries only the
+   scanned remainder.
 1. **Local vision tier as the default.** Run a local vision model on the GPU as
    the primary transcriber; cloud Opus becomes escalation-only. Attacks both
    axes at once — near-zero marginal cost and no rate limit (so it parallelizes
@@ -95,6 +119,12 @@ tech choice (specific local model/runtime is `plan`'s call).
   non-deterministic local model is safe here.
 - 255 page PNGs already rendered deterministically at 150 DPI (1275×1651) under
   `extracted/pages/` — the measurement corpus exists today.
+- **`pypdfium2` is already a dependency** (renders pages in `explode.py`) and
+  exposes per-page text extraction (`get_textpage().get_text_range()`) — the
+  text-layer pre-pass needs no new dependency.
+- **Measured for this case:** 20/22 PDFs born-digital, ~248/255 pages with a rich
+  embedded text layer; only `doc-24775937` and `doc-24775944` (6 pages,
+  ~54 chars/page) are scanned/image-only and need vision OCR.
 
 ## Constraints
 
@@ -112,6 +142,8 @@ tech choice (specific local model/runtime is `plan`'s call).
 
 - Multi-case / corpus-scale orchestration or a job queue (scope is this case).
 - Batch API path (superseded by local-first at this scope).
-- Finer PDF-to-document splitting, OCR-only fallback as the primary path, or
-  changing the DPI of the **stored** PNGs.
+- Finer PDF-to-document splitting, or changing the DPI of the **stored** PNGs.
+  (Note: extracting a PDF's *existing* embedded text layer is **in scope** as
+  lever 0 — it is distinct from pixel-recognition OCR, which stays a non-goal as
+  a *primary* path; OCR/vision is the fallback only for image-only pages.)
 - Any change to the Actual/Exploded lenses or the web viewer.
