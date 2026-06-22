@@ -60,6 +60,24 @@ def extract_zip(zip_path: str | Path, dest: str | Path) -> Path:
     return dest
 
 
+def find_intake_dir(case_dir: str | Path) -> Path:
+    """Locate the extracted intake dir for a built case: ``case_dir`` itself if it
+    holds ``data.json``, else the single folder under ``case_dir/intake`` that
+    does (where ``lawnlord import`` extracts the zip)."""
+    case_dir = Path(case_dir)
+    if (case_dir / DATA_FILENAME).is_file():
+        return case_dir
+    base = case_dir / "intake"
+    if base.is_dir():
+        for child in sorted(base.iterdir()):
+            if (child / DATA_FILENAME).is_file():
+                return child
+    raise FileNotFoundError(
+        f"no extracted intake found under {case_dir} (expected data.json or "
+        f"intake/<stem>/data.json) — run `lawnlord import <zip>` first"
+    )
+
+
 def _load_json(path: Path):
     if not path.exists():
         raise FileNotFoundError(f"missing {path.name}: {path}")

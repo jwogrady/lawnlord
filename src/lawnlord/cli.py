@@ -15,16 +15,18 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 from pathlib import Path
 
 from rich.table import Table
 
 from .console import console
 from .db import apply_schema, open_case_db
+from .explode import explode_case
 from .export import export_actual
 from .ingest import ingest_case
 from .intake import load_intake, scaffold
-from .reader import captured_at, extract_zip
+from .reader import captured_at, extract_zip, find_intake_dir
 from .workspace import Case
 
 
@@ -90,6 +92,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--case-dir", default=".", help="Case root holding lawnlord.duckdb (default: cwd)"
     )
 
+    p_explode = sub.add_parser(
+        "explode",
+        help="Explode filed PDFs into documents + page PNGs (the Exploded layer)",
+    )
+    p_explode.add_argument(
+        "--case-dir", default=".", help="Case root holding lawnlord.duckdb (default: cwd)"
+    )
+    p_explode.add_argument(
+        "--dpi", type=int, default=150, help="Render DPI for the page PNGs (default: 150)"
+    )
+
     return parser
 
 
@@ -123,10 +136,13 @@ def _main(argv: list[str] | None = None) -> None:
     if args.command == "import":
         case_dir = Path(args.case_dir).resolve() if args.case_dir else Path.cwd()
         source = Path(args.source)
-        # A directory is treated as already-extracted intake; a zip is extracted
-        # (safely) under <case-dir>/intake/<stem> first.
+        # The intake is always materialized under <case-dir>/intake/<name> so the
+        # case is self-contained (explode and the viewer resolve it from there).
+        # A zip is extracted safely; an already-extracted dir is copied in.
         if source.is_dir():
-            intake_dir = source.resolve()
+            intake_dir = case_dir / "intake" / source.name
+            if source.resolve() != intake_dir:
+                shutil.copytree(source, intake_dir, dirs_exist_ok=True)
         else:
             intake_dir = case_dir / "intake" / source.stem
             extract_zip(source, intake_dir)
@@ -162,4 +178,29 @@ def _main(argv: list[str] | None = None) -> None:
             print(json.dumps(export_actual(con)))
         finally:
             con.close()
+        return
+
+    if args.command == "explode":
+        case_dir = Path(args.case_dir).resolve()
+        intake_dir = find_intake_dir(case_dir)
+        out_dir = case_dir / "extracted" / "pages"
+        con = open_case_db(case_dir / "lawnlord.duckdb")
+        apply_schema(con)
+        stats = explode_case(con, intake_dir, out_dir, captured_at(intake_dir), dpi=args.dpi)
+        con.close()
+        table = Table(title="Exploded (filed PDFs → documents + page PNGs)")
+        table.add_column("Metric")
+        table.add_column("Value", justify="right")
+        table.add_row("Documents", str(stats["documents"]))
+        table.add_row("Pages rendered", str(stats["pages"]))
+        table.add_row("PNGs", str(out_dir))
+        console.print(table)
+        for m in stats["mismatches"]:
+            console.print(
+                f"[yellow]Page-count mismatch:[/] {m['image_id']} "
+                f"declared {m['declared']} vs rendered {m['rendered']}"
+            )
+        if stats["skipped_images"]:
+            console.print(f"[yellow]Skipped (no source PDF):[/] {len(stats['skipped_images'])}")
+        console.print("[green]Done.[/]")
         return

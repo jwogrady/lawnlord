@@ -22,6 +22,13 @@ can be reimplemented cleanly over the zip (see the [ROADMAP](ROADMAP.md) *Reimpl
 
 ### Added
 
+- **`lawnlord explode` — the Exploded layer** (foundation F3, #94). Renders every filed PDF's pages
+  to PNGs (pypdfium2 + Pillow, deterministic at a fixed DPI) and indexes them as additive `documents`
+  (one per image) + `pages` (one per page, with its PNG pointer + sha256) tables — on top of the
+  mirror, never mutating it. Declared-vs-rendered page-count mismatches are surfaced. `SCHEMA_VERSION`
+  → 8. `import` now materializes the intake under `<case-dir>/intake/` (extract a zip, or copy an
+  already-extracted dir) so a case is self-contained. New deps: `pypdfium2`, `pillow`. Verified on the
+  real case: 22 documents → 255 page PNGs.
 - **Actual lens — the Odyssey-faithful viewer** (foundation F2, #93). A local Bun viewer that
   reproduces the portal from the DuckDB **mirror** (not by re-parsing the zip): case header, parties,
   and the register of actions as a **sortable / filterable** table; each filing opens as its **native
