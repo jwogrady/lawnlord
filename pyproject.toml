@@ -28,6 +28,7 @@ classifiers = [
     "Topic :: Text Processing",
 ]
 dependencies = [
+    "anthropic>=0.69",
     "duckdb>=1.1",
     "jsonschema>=4.0",
     "pillow>=10.0",
