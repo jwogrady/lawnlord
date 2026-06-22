@@ -122,6 +122,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_transcribe.add_argument(
         "--model", default=None, help=f"Override the vision model (default: {DEFAULT_MODEL})"
     )
+    p_transcribe.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-transcribe pages that already have text (append a new revision); "
+        "default skips them",
+    )
 
     return parser
 
@@ -259,13 +265,15 @@ def _main(argv: list[str] | None = None) -> None:
         apply_schema(con)
         generated_at = captured_at(find_intake_dir(case_dir))
         stats = transcribe_case(
-            con, pages_dir, generated_at, make_client(), model=args.model or DEFAULT_MODEL
+            con, pages_dir, generated_at, make_client(),
+            model=args.model or DEFAULT_MODEL, force=args.force,
         )
         con.close()
         table = Table(title="Transcribed (page PNG → AI text)")
         table.add_column("Metric")
         table.add_column("Value", justify="right")
         table.add_row("Pages transcribed", str(stats["pages"]))
+        table.add_row("Skipped (already transcribed)", str(len(stats["skipped_existing"])))
         table.add_row("Avg fidelity", f"{stats['avg_fidelity']:.2f}")
         console.print(table)
         if stats["skipped"]:
