@@ -126,9 +126,20 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _load_dotenv() -> None:
+    """Source a project-local ``.env`` (cwd) so ``ANTHROPIC_API_KEY``,
+    ``LAWNLORD_INTAKE``, etc. need not be exported by hand — matching how Bun
+    auto-loads ``.env`` for the web viewer. Real exported env vars win
+    (``override=False``); a missing ``.env`` is a silent no-op."""
+    from dotenv import load_dotenv
+
+    load_dotenv(dotenv_path=Path.cwd() / ".env", override=False)
+
+
 def main(argv: list[str] | None = None) -> None:
     """Entry point. Report known input errors cleanly (a clear message and exit
     1, no traceback); let unexpected errors surface for debugging."""
+    _load_dotenv()
     try:
         _main(argv)
     except (FileNotFoundError, ValueError) as exc:
