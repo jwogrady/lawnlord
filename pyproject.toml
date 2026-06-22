@@ -1,6 +1,6 @@
 [project]
 name = "lawnlord"
-version = "0.3.0"
+version = "0.4.0"
 description = "Local-first legal case-understanding engine: mirror a court case from its deterministic export (the rake zip) into a verifiable, source-traceable index — the substrate for reading and fighting the case."
 readme = "README.md"
 license = { file = "LICENSE" }

@@ -10,7 +10,11 @@ state *before* a release) lives in the [ROADMAP](ROADMAP.md); the current workin
 always the commit. Each release below links to its **release milestone** and the **issues** it
 closed.
 
-## [Unreleased] — alpha pivot: the zip is the intake standard
+## [Unreleased]
+
+_Nothing yet._
+
+## [0.4.0] - 2026-06-22 — alpha pivot: the zip is the intake standard
 
 **Branch:** `refactor/zip-standard-intake` · **Backup of the prior state:** the `alpha` branch.
 
