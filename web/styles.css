@@ -216,3 +216,86 @@ iframe.snap {
 .snapshot {
 	grid-column: 1 / -1;
 }
+
+/* Exploded lens */
+.docs {
+	position: sticky;
+	top: 72px;
+	max-height: 85vh;
+	overflow: auto;
+	display: flex;
+	flex-direction: column;
+	gap: 0.25rem;
+}
+
+.docs-h {
+	font-size: 0.8rem;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	color: var(--muted);
+	padding-bottom: 0.4rem;
+}
+
+.docitem {
+	display: flex;
+	flex-direction: column;
+	gap: 0.15rem;
+	text-align: left;
+	background: var(--panel);
+	border: 1px solid var(--line);
+	border-radius: 5px;
+	padding: 0.45rem 0.6rem;
+	color: var(--cream);
+	cursor: pointer;
+}
+
+.docitem.cur {
+	border-left: 3px solid var(--gold);
+}
+
+.exdoc h3 {
+	font-size: 0.95rem;
+	color: var(--gold);
+	border-bottom: 1px solid var(--line);
+	padding-bottom: 0.3rem;
+}
+
+.exrow {
+	display: grid;
+	grid-template-columns: minmax(220px, 360px) 1fr;
+	gap: 1rem;
+	padding: 0.75rem 0;
+	border-bottom: 1px solid var(--line);
+	align-items: start;
+}
+
+.exfig {
+	margin: 0;
+}
+
+.exfig figcaption {
+	font-size: 0.75rem;
+	color: var(--muted);
+	margin-bottom: 0.25rem;
+}
+
+.exfig img {
+	width: 100%;
+	border: 1px solid var(--line);
+	background: #fff;
+}
+
+.extext pre {
+	white-space: pre-wrap;
+	word-break: break-word;
+	font:
+		13px/1.5 ui-monospace,
+		SFMono-Regular,
+		Menlo,
+		monospace;
+	margin: 0.25rem 0 0;
+}
+
+.exmeta {
+	font-size: 0.78rem;
+}

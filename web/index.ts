@@ -60,6 +60,16 @@ const server = Bun.serve({
 				headers: { "content-type": "application/json" },
 			});
 		},
+		// The Exploded-lens payload: images → documents → pages + transcription.
+		"/api/exploded": async () => {
+			const out = await Bun.$`uv run lawnlord export-exploded --case-dir ${CASE_DIR}`
+				.cwd(REPO_ROOT)
+				.quiet()
+				.text();
+			return new Response(out, {
+				headers: { "content-type": "application/json" },
+			});
+		},
 	},
 	async fetch(req) {
 		const url = new URL(req.url);
@@ -68,6 +78,12 @@ const server = Bun.serve({
 		}
 		if (url.pathname.startsWith("/pages/")) {
 			return serveFromIntake("pages", url.pathname.slice("/pages/".length));
+		}
+		// Exploded-layer page PNGs (rendered by `lawnlord explode`).
+		if (url.pathname.startsWith("/png/")) {
+			const rest = decodeURIComponent(url.pathname.slice("/png/".length));
+			if (rest.includes("..")) return new Response("Forbidden", { status: 403 });
+			return new Response(Bun.file(join(CASE_DIR, "extracted", "pages", rest)));
 		}
 		return new Response("Not found", { status: 404 });
 	},

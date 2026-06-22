@@ -76,3 +76,50 @@ def export_actual(con: duckdb.DuckDBPyConnection) -> dict:
         "registerOfActions": register,
         "documents": documents,
     }
+
+
+def export_exploded(con: duckdb.DuckDBPyConnection) -> dict:
+    """Build the Exploded-lens payload: each image → its documents → pages, with
+    the latest transcription (and fidelity) beside each page. Read-only.
+
+    Pages whose transcription hasn't been run carry ``text: null`` — the lens
+    still shows the page image. The latest revision per page wins.
+    """
+    # Latest transcription per page (max rev), if any.
+    text_by_page: dict[str, dict] = {}
+    for r in _rows(
+        con,
+        "SELECT pt.page_id, pt.text, pt.fidelity FROM page_text pt "
+        "JOIN (SELECT page_id, max(rev) AS rev FROM page_text GROUP BY page_id) m "
+        "ON m.page_id = pt.page_id AND m.rev = pt.rev",
+    ):
+        text_by_page[r["page_id"]] = {"text": r["text"], "fidelity": r["fidelity"]}
+
+    pages_by_doc: dict[str, list[dict]] = {}
+    for p in _rows(
+        con,
+        "SELECT id, document_id, page_number AS pageNumber, "
+        "page_image_path AS png FROM pages ORDER BY document_id, page_number",
+    ):
+        t = text_by_page.get(p.pop("id"), {})
+        p["text"] = t.get("text")
+        p["fidelity"] = t.get("fidelity")
+        pages_by_doc.setdefault(p.pop("document_id"), []).append(p)
+
+    docs_by_image: dict[str, list[dict]] = {}
+    for d in _rows(
+        con,
+        "SELECT id, image_id, title, page_count AS pageCount FROM documents "
+        "ORDER BY image_id, id",
+    ):
+        d["pages"] = pages_by_doc.get(d.pop("id"), [])
+        docs_by_image.setdefault(d.pop("image_id"), []).append(d)
+
+    images = _rows(
+        con,
+        "SELECT id AS imageId, title, filename FROM images ORDER BY filing_date, title",
+    )
+    for img in images:
+        img["documents"] = docs_by_image.get(img["imageId"], [])
+
+    return {"images": images}
