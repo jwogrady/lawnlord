@@ -1,11 +1,11 @@
 """Command-line entry point: subcommands over an intake folder.
 
-    lawnlord start [root]    scaffold an intake folder
+    lawnlord start [root]     scaffold an intake folder
+    lawnlord import <zip>     import a rake intake zip into a per-case DuckDB
 
 The intake standard is the deterministic zip (schema.json + data.json + files/
-+ pages/) produced by ``jwogrady/rake``. The zip -> DuckDB build and the case
-viewer are rebuilt on the following branches; this layer currently scaffolds the
-intake location and resolves a configurable intake root.
++ pages/) produced by ``jwogrady/rake``. ``import`` extracts it safely, validates
+``data.json`` against the bundled ``schema.json``, and builds the DuckDB mirror.
 
 ``root`` defaults to the current directory; lawnlord resolves the intake/corpus
 locations from it (honoring an optional lawnlord.toml).
@@ -17,8 +17,14 @@ import argparse
 import os
 from pathlib import Path
 
+from rich.table import Table
+
 from .console import console
+from .db import apply_schema, open_case_db
+from .ingest import ingest_case
 from .intake import load_intake, scaffold
+from .reader import captured_at, extract_zip
+from .workspace import Case
 
 
 def _add_root(parser: argparse.ArgumentParser) -> None:
@@ -66,6 +72,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--force", action="store_true", help="Overwrite an existing config / intake README"
     )
 
+    p_import = sub.add_parser(
+        "import",
+        help="Import a rake intake zip (or its extracted dir) into a per-case DuckDB",
+    )
+    p_import.add_argument("source", help="Path to the intake zip, or an extracted intake dir")
+    p_import.add_argument(
+        "--case-dir", default=None, help="Output root for lawnlord.duckdb (default: cwd)"
+    )
+
     return parser
 
 
@@ -94,4 +109,36 @@ def _main(argv: list[str] | None = None) -> None:
         console.print(
             f"Drop the intake zip in [bold]{intake.intake_dir}[/]."
         )
+        return
+
+    if args.command == "import":
+        case_dir = Path(args.case_dir).resolve() if args.case_dir else Path.cwd()
+        source = Path(args.source)
+        # A directory is treated as already-extracted intake; a zip is extracted
+        # (safely) under <case-dir>/intake/<stem> first.
+        if source.is_dir():
+            intake_dir = source.resolve()
+        else:
+            intake_dir = case_dir / "intake" / source.stem
+            extract_zip(source, intake_dir)
+        case = Case.from_intake(intake_dir, case_dir=case_dir)
+        con = open_case_db(case.duckdb_path)
+        apply_schema(con)
+        stats = ingest_case(con, case, captured_at(intake_dir))
+        con.close()
+        table = Table(title="Imported case (zip → DuckDB mirror)")
+        table.add_column("Metric")
+        table.add_column("Value", justify="right")
+        table.add_row("Case", case.case_number)
+        table.add_row("Parties", str(stats["parties"]))
+        table.add_row("Events", str(stats["events"]))
+        table.add_row("Images (filed PDFs)", str(stats["images"]))
+        table.add_row("Image↔event links", str(stats["image_events"]))
+        table.add_row("DuckDB", str(case.duckdb_path))
+        console.print(table)
+        if stats["skipped_images"]:
+            console.print(
+                f"[yellow]Skipped (no source PDF):[/] {len(stats['skipped_images'])}"
+            )
+        console.print("[green]Done.[/]")
         return

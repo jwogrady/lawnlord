@@ -49,15 +49,31 @@ class Case:
     def from_intake(
         cls, intake_dir: str | Path, case_dir: str | Path | None = None
     ) -> Case:
-        """Resolve a case from the intake zip's extracted contents.
+        """Resolve a case from an extracted intake zip.
 
-        The zip → CaseModel reader lands on the next refactor branch; until then
-        this raises so no stale provider-parsing path is silently used.
+        ``intake_dir`` holds the zip's contents (``data.json`` + ``schema.json``
+        + ``files/``); ``case_dir`` is the output root for the DuckDB index
+        (default: cwd). The model is read and validated by
+        :func:`lawnlord.reader.load_case_model`.
         """
-        raise NotImplementedError(
-            "The intake-zip reader (data.json -> CaseModel) lands on the next "
-            "branch. The old ody/txe/combo provider adapters were removed in "
-            "favor of the deterministic zip standard."
+        from .reader import load_case_model
+
+        intake_dir = Path(intake_dir).resolve()
+        if not intake_dir.is_dir():
+            raise FileNotFoundError(f"intake folder not found: {intake_dir}")
+        if not (intake_dir / "data.json").is_file():
+            raise FileNotFoundError(
+                f"{intake_dir} is not an extracted intake zip — it has no data.json. "
+                "Run `lawnlord import <zip>`, or point at the zip's extracted contents "
+                "(data.json + schema.json + files/)."
+            )
+        model = load_case_model(intake_dir)
+        case_dir = Path(case_dir).resolve() if case_dir else Path.cwd()
+        return cls(
+            intake_dir=intake_dir,
+            provider=model.provider,
+            case_dir=case_dir,
+            model=model,
         )
 
     # --- model passthroughs -------------------------------------------------
