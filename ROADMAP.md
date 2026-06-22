@@ -101,24 +101,32 @@ pivot.** The first-generation web reviewer ([#66](https://github.com/jwogrady/la
 folded into **F4 (#95)**. The review/lens UI returns as **F2/F5 (#93/#96)** plus the lens switcher.
 Closed for history.
 
-### v0.5.0 — Knowledge base + computed deadline timeline
+### v0.5.0 — Local-first transcription
+[Milestone #9](https://github.com/jwogrady/lawnlord/milestone/9) · *The `aiAccessible` readiness gate
+(principle #5): reconstructable, high-fidelity page text is the prerequisite every analysis layer
+below depends on — so it ships before the knowledge base.* Make transcription **local-first** on the
+GPU with **fidelity-gated cloud escalation** — fast, cheap, resumable, decided by measured fidelity.
+See [`docs/problem-transcription-efficiency.md`](docs/problem-transcription-efficiency.md) and
+[`docs/adr/0001`–`0003`](docs/adr/).
+
+### v0.6.0 — Knowledge base + computed deadline timeline
 [Milestone #3](https://github.com/jwogrady/lawnlord/milestone/3) · *Curated external context the user supplies, plus the real clock derived from the record.*
 
 - [#41](https://github.com/jwogrady/lawnlord/issues/41) — Knowledge-base intake: curated external resources (links, JSON, PDFs) as context
 - [#42](https://github.com/jwogrady/lawnlord/issues/42) — Computed deadline timeline: filing dates + KB rules → deadlines (the real foreclosure clock)
 
-### v0.6.0 — Analysis layer: accept/decline + entities + relationships
+### v0.7.0 — Analysis layer: accept/decline + entities + relationships
 [Milestone #4](https://github.com/jwogrady/lawnlord/milestone/4) · *The "why" layer — machine-proposed, human-accepted; only `accepted` is truth.*
 
 - [#28](https://github.com/jwogrady/lawnlord/issues/28) — Strategic analysis as accept/decline proposals over an immutable record *(anchor)*
 - [#38](https://github.com/jwogrady/lawnlord/issues/38) — Epic: accept/decline mechanism + entity & relationship extraction
 
-### v0.7.0 — The ledger: dues vs fees, actual owed
+### v0.8.0 — The ledger: dues vs fees, actual owed
 [Milestone #5](https://github.com/jwogrady/lawnlord/milestone/5) · *The number that decides the case.*
 
 - [#39](https://github.com/jwogrady/lawnlord/issues/39) — Epic: dues vs fees, claimed vs governing-document-authorized, actual-owed
 
-### v0.8.0 — Grounds to set aside + generate motions to file
+### v0.9.0 — Grounds to set aside + generate motions to file
 [Milestone #6](https://github.com/jwogrady/lawnlord/milestone/6) · *Terminal: the supportable case, drafted for human review.*
 
 - [#40](https://github.com/jwogrady/lawnlord/issues/40) — Epic: grounds to set aside (gap/contradiction reasoning)

@@ -80,7 +80,7 @@ def test_transcribe_case_appends_rev0(tmp_path):
     assert all(r[3] == "PETITION ..." and r[4] == 0.9 for r in rows)
 
 
-def test_re_running_appends_a_revision(tmp_path):
+def test_force_appends_a_revision(tmp_path):
     case_dir = _exploded_case(tmp_path, pages=1)
     db = case_dir / "lawnlord.duckdb"
     pages = case_dir / "extracted" / "pages"
@@ -91,7 +91,8 @@ def test_re_running_appends_a_revision(tmp_path):
     con.close()
 
     con = main.open_case_db(db)
-    main.transcribe_case(con, pages, "t1", _FakeClient(transcription="SECOND", fidelity=0.7))
+    main.transcribe_case(con, pages, "t1",
+                         _FakeClient(transcription="SECOND", fidelity=0.7), force=True)
     try:
         revs = con.execute(
             "SELECT rev, text FROM page_text ORDER BY rev"
@@ -103,6 +104,32 @@ def test_re_running_appends_a_revision(tmp_path):
     assert revs[1][1] == "SECOND"
 
 
+def test_re_running_skips_already_transcribed_by_default(tmp_path):
+    # Resumable: a page that already has text is skipped (only-missing) unless
+    # --force. Re-running costs nothing for done pages.
+    case_dir = _exploded_case(tmp_path, pages=1)
+    db = case_dir / "lawnlord.duckdb"
+    pages = case_dir / "extracted" / "pages"
+
+    con = main.open_case_db(db)
+    main.apply_schema(con)
+    main.transcribe_case(con, pages, "t0", _FakeClient(transcription="FIRST", fidelity=0.8))
+    con.close()
+
+    con = main.open_case_db(db)
+    client = _FakeClient(transcription="SECOND", fidelity=0.7)
+    stats = main.transcribe_case(con, pages, "t1", client)
+    try:
+        revs = con.execute("SELECT rev, text FROM page_text ORDER BY rev").fetchall()
+    finally:
+        con.close()
+    assert client.calls == 0                         # done already → no model call
+    assert stats["pages"] == 0
+    assert len(stats["skipped_existing"]) == 1
+    assert [r[0] for r in revs] == [0]               # no new revision
+    assert revs[0][1] == "FIRST"                     # untouched
+
+
 def test_transcribe_page_sends_image_and_parses(tmp_path):
     case_dir = _exploded_case(tmp_path, pages=1)
     png = next((case_dir / "extracted" / "pages").rglob("*.png"))
@@ -112,8 +139,11 @@ def test_transcribe_page_sends_image_and_parses(tmp_path):
 
 
 def test_cli_transcribe_is_opt_in(tmp_path, capsys, monkeypatch):
-    # No ANTHROPIC_API_KEY → clear skip, no crash, no rows.
+    # No ANTHROPIC_API_KEY → clear skip, no crash, no rows. Hermetic: chdir to a
+    # dir with no .env so the CLI's .env autoload can't supply a key (a key in a
+    # project .env counts as opting in — see _load_dotenv).
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.chdir(tmp_path)
     case_dir = _exploded_case(tmp_path, pages=1)
     capsys.readouterr()
     main.main(["transcribe", "--case-dir", str(case_dir)])

@@ -122,13 +122,30 @@ def build_parser() -> argparse.ArgumentParser:
     p_transcribe.add_argument(
         "--model", default=None, help=f"Override the vision model (default: {DEFAULT_MODEL})"
     )
+    p_transcribe.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-transcribe pages that already have text (append a new revision); "
+        "default skips them",
+    )
 
     return parser
+
+
+def _load_dotenv() -> None:
+    """Source a project-local ``.env`` (cwd) so ``ANTHROPIC_API_KEY``,
+    ``LAWNLORD_INTAKE``, etc. need not be exported by hand — matching how Bun
+    auto-loads ``.env`` for the web viewer. Real exported env vars win
+    (``override=False``); a missing ``.env`` is a silent no-op."""
+    from dotenv import load_dotenv
+
+    load_dotenv(dotenv_path=Path.cwd() / ".env", override=False)
 
 
 def main(argv: list[str] | None = None) -> None:
     """Entry point. Report known input errors cleanly (a clear message and exit
     1, no traceback); let unexpected errors surface for debugging."""
+    _load_dotenv()
     try:
         _main(argv)
     except (FileNotFoundError, ValueError) as exc:
@@ -248,13 +265,15 @@ def _main(argv: list[str] | None = None) -> None:
         apply_schema(con)
         generated_at = captured_at(find_intake_dir(case_dir))
         stats = transcribe_case(
-            con, pages_dir, generated_at, make_client(), model=args.model or DEFAULT_MODEL
+            con, pages_dir, generated_at, make_client(),
+            model=args.model or DEFAULT_MODEL, force=args.force,
         )
         con.close()
         table = Table(title="Transcribed (page PNG → AI text)")
         table.add_column("Metric")
         table.add_column("Value", justify="right")
         table.add_row("Pages transcribed", str(stats["pages"]))
+        table.add_row("Skipped (already transcribed)", str(len(stats["skipped_existing"])))
         table.add_row("Avg fidelity", f"{stats['avg_fidelity']:.2f}")
         console.print(table)
         if stats["skipped"]:

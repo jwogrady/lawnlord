@@ -94,12 +94,17 @@ def transcribe_case(
     generated_at: str,
     client,
     model: str = DEFAULT_MODEL,
+    force: bool = False,
 ) -> dict:
-    """Transcribe every page in the `pages` table, appending to `page_text`.
+    """Transcribe pages in the `pages` table, appending to `page_text`.
 
     ``pages_dir`` is where the page PNGs live (the explode step's output root);
-    ``page_image_path`` is relative to it. Each page gets the next rev (rev 0 the
-    first time), so re-running appends rather than overwriting.
+    ``page_image_path`` is relative to it.
+
+    Resumable by default: a page that already has a `page_text` row is **skipped**
+    (only-missing), so re-running — or recovering an interrupted run — costs only
+    the pages still to do. ``force=True`` re-transcribes every page, appending the
+    next rev (rev 0 stays immutable; revisions are never overwritten).
     """
     pages_dir = Path(pages_dir)
     rows = con.execute(
@@ -109,15 +114,19 @@ def transcribe_case(
     done = 0
     fidelity_sum = 0.0
     skipped: list[str] = []
+    skipped_existing: list[str] = []
     for page_id, case_id, rel in rows:
         png = pages_dir / rel
         if not png.exists():
             skipped.append(rel)
             continue
-        result = transcribe_page(png, client, model=model)
         prev = con.execute(
             "SELECT max(rev) FROM page_text WHERE page_id = ?", [page_id]
         ).fetchone()[0]
+        if prev is not None and not force:
+            skipped_existing.append(page_id)
+            continue
+        result = transcribe_page(png, client, model=model)
         rev = 0 if prev is None else prev + 1
         con.execute(
             "INSERT INTO page_text (case_id, page_id, rev, source, text, fidelity, "
@@ -132,4 +141,5 @@ def transcribe_case(
         "pages": done,
         "avg_fidelity": (fidelity_sum / done) if done else 0.0,
         "skipped": skipped,
+        "skipped_existing": skipped_existing,
     }
