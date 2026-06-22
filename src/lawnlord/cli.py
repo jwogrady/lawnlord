@@ -27,6 +27,7 @@ from .export import export_actual
 from .ingest import ingest_case
 from .intake import load_intake, scaffold
 from .reader import captured_at, extract_zip, find_intake_dir
+from .transcribe import DEFAULT_MODEL, make_client, transcribe_case
 from .workspace import Case
 
 
@@ -101,6 +102,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_explode.add_argument(
         "--dpi", type=int, default=150, help="Render DPI for the page PNGs (default: 150)"
+    )
+
+    p_transcribe = sub.add_parser(
+        "transcribe",
+        help="Transcribe each page PNG with Claude vision (cloud opt-in; needs ANTHROPIC_API_KEY)",
+    )
+    p_transcribe.add_argument(
+        "--case-dir", default=".", help="Case root holding lawnlord.duckdb (default: cwd)"
+    )
+    p_transcribe.add_argument(
+        "--model", default=None, help=f"Override the vision model (default: {DEFAULT_MODEL})"
     )
 
     return parser
@@ -202,5 +214,32 @@ def _main(argv: list[str] | None = None) -> None:
             )
         if stats["skipped_images"]:
             console.print(f"[yellow]Skipped (no source PDF):[/] {len(stats['skipped_images'])}")
+        console.print("[green]Done.[/]")
+        return
+
+    if args.command == "transcribe":
+        case_dir = Path(args.case_dir).resolve()
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            console.print(
+                "[yellow]Transcription is cloud opt-in.[/] Set ANTHROPIC_API_KEY to "
+                "enable the Claude vision pass. Skipped."
+            )
+            return
+        pages_dir = case_dir / "extracted" / "pages"
+        con = open_case_db(case_dir / "lawnlord.duckdb")
+        apply_schema(con)
+        generated_at = captured_at(find_intake_dir(case_dir))
+        stats = transcribe_case(
+            con, pages_dir, generated_at, make_client(), model=args.model or DEFAULT_MODEL
+        )
+        con.close()
+        table = Table(title="Transcribed (page PNG → AI text)")
+        table.add_column("Metric")
+        table.add_column("Value", justify="right")
+        table.add_row("Pages transcribed", str(stats["pages"]))
+        table.add_row("Avg fidelity", f"{stats['avg_fidelity']:.2f}")
+        console.print(table)
+        if stats["skipped"]:
+            console.print(f"[yellow]Skipped (no PNG):[/] {len(stats['skipped'])}")
         console.print("[green]Done.[/]")
         return

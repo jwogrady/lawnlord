@@ -8,7 +8,7 @@ _MIRROR_TABLES = {
     "schema_meta", "cases", "parties", "events", "images",
     "image_events", "financials", "financial_transactions",
 }
-_EXPLODED_TABLES = {"documents", "pages"}
+_EXPLODED_TABLES = {"documents", "pages", "page_text"}
 
 
 def _table_names(con):

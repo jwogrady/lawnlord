@@ -54,4 +54,6 @@ from .reader import (
     load_case_model,
     validate_data,
 )
+from .transcribe import DEFAULT_MODEL as TRANSCRIBE_MODEL
+from .transcribe import transcribe_case, transcribe_page
 from .workspace import OUTPUT_SUBDIRS, Case

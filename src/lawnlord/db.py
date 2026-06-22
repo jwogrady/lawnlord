@@ -13,8 +13,10 @@ court's leaf). The **mirror** is the relational mirror of the zip's ``data.json`
 
 On top of the mirror sits the **Exploded layer** — ``documents`` (one per image)
 and ``pages`` (one per rendered page, with its PNG pointer), populated by
-:mod:`lawnlord.explode`. It is additive: it references the mirror's images but
-never mutates them. Transcription text and analysis are later additive layers.
+:mod:`lawnlord.explode`; and ``page_text`` — the **append-only** AI transcription
+of each page (rev 0 immutable; re-runs append a revision), populated by
+:mod:`lawnlord.transcribe`. All additive: they reference the mirror but never
+mutate it. Analysis is a later additive layer.
 """
 
 from __future__ import annotations
@@ -29,8 +31,9 @@ import duckdb
 # v8 (F3): the Exploded layer — `documents` (one per image) + `pages` (one per
 # rendered page, with its PNG pointer) — added on top of the mirror. Additive:
 # references the mirror's images, never mutates them.
+# v9 (F4): `page_text` — append-only AI transcription per page (rev 0 immutable).
 # Per-case DBs are regenerable, so bumps need no in-place migration.
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 # One statement per table; CREATE ... IF NOT EXISTS keeps apply_schema idempotent.
 _SCHEMA_STATEMENTS = (
@@ -145,6 +148,21 @@ _SCHEMA_STATEMENTS = (
         page_image_path TEXT,
         page_image_sha256 TEXT,
         created_at TEXT
+    )
+    """,
+    # Append-only AI transcription per page: rev 0 is the original (immutable);
+    # re-transcription / human edits append a new rev. Never overwrites.
+    """
+    CREATE TABLE IF NOT EXISTS page_text (
+        case_id TEXT NOT NULL,
+        page_id TEXT NOT NULL,
+        rev INTEGER NOT NULL,
+        source TEXT,
+        text TEXT,
+        fidelity DOUBLE,
+        model TEXT,
+        created_at TEXT,
+        PRIMARY KEY (page_id, rev)
     )
     """,
 )

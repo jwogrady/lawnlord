@@ -22,6 +22,12 @@ can be reimplemented cleanly over the zip (see the [ROADMAP](ROADMAP.md) *Reimpl
 
 ### Added
 
+- **`lawnlord transcribe` — AI page transcription** (foundation F4, #95). PNG-per-page → Claude vision
+  (`claude-opus-4-8`) transcription, persisted to an **append-only** `page_text` table (rev 0
+  immutable; re-runs append a revision). Each row records a **fidelity** signal — the model's
+  self-assessment of how completely it read the page (the honest reframing of the folded #70). Cloud
+  **opt-in**: runs only when `ANTHROPIC_API_KEY` is set (absent → a clear skip, no crash). `SCHEMA_VERSION`
+  → 9. Re-adds the `anthropic` dependency.
 - **`lawnlord explode` — the Exploded layer** (foundation F3, #94). Renders every filed PDF's pages
   to PNGs (pypdfium2 + Pillow, deterministic at a fixed DPI) and indexes them as additive `documents`
   (one per image) + `pages` (one per page, with its PNG pointer + sha256) tables — on top of the
