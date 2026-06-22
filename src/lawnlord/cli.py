@@ -21,6 +21,7 @@ from rich.table import Table
 
 from .console import console
 from .db import apply_schema, open_case_db
+from .export import export_actual
 from .ingest import ingest_case
 from .intake import load_intake, scaffold
 from .reader import captured_at, extract_zip
@@ -79,6 +80,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_import.add_argument("source", help="Path to the intake zip, or an extracted intake dir")
     p_import.add_argument(
         "--case-dir", default=None, help="Output root for lawnlord.duckdb (default: cwd)"
+    )
+
+    p_export = sub.add_parser(
+        "export-actual",
+        help="Print the Actual-lens view (case + parties + register of actions) as JSON",
+    )
+    p_export.add_argument(
+        "--case-dir", default=".", help="Case root holding lawnlord.duckdb (default: cwd)"
     )
 
     return parser
@@ -141,4 +150,16 @@ def _main(argv: list[str] | None = None) -> None:
                 f"[yellow]Skipped (no source PDF):[/] {len(stats['skipped_images'])}"
             )
         console.print("[green]Done.[/]")
+        return
+
+    if args.command == "export-actual":
+        # Emit ONLY JSON on stdout so the viewer can parse it; the data comes
+        # from the DuckDB mirror, read-only.
+        import json
+
+        con = open_case_db(Path(args.case_dir) / "lawnlord.duckdb", read_only=True)
+        try:
+            print(json.dumps(export_actual(con)))
+        finally:
+            con.close()
         return
