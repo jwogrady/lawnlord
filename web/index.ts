@@ -1,0 +1,77 @@
+// lawnlord Actual-lens viewer — a local, single-user desktop tool.
+//
+// Reproduces the Odyssey portal from the case's DuckDB *mirror* (not by
+// re-parsing the zip): the register of actions, parties, and each filing as its
+// native PDF, plus the captured Odyssey pages/*.html for snapshot parity. It
+// ends at the image — no extracted text, no analysis (that's the Exploded lens).
+//
+// CASE_DIR points at a case built by `lawnlord import` (holds lawnlord.duckdb
+// and intake/<stem>/ with files/ + pages/). The case JSON comes from the Python
+// CLI (the DuckDB read lives there); this server only serves it and the files.
+
+import { existsSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+
+import index from "./index.html";
+
+const CASE_DIR = process.env.CASE_DIR ?? ".";
+const REPO_ROOT = join(import.meta.dir, "..");
+const PORT = Number(process.env.PORT ?? 4173);
+
+// The extracted intake dir (data.json + files/ + pages/): either CASE_DIR
+// itself, or the single folder under CASE_DIR/intake that holds a data.json.
+function resolveIntakeDir(): string {
+	if (existsSync(join(CASE_DIR, "data.json"))) return CASE_DIR;
+	const base = join(CASE_DIR, "intake");
+	if (existsSync(base)) {
+		for (const entry of readdirSync(base)) {
+			const dir = join(base, entry);
+			if (existsSync(join(dir, "data.json"))) return dir;
+		}
+	}
+	throw new Error(
+		`No intake found under ${CASE_DIR} (expected data.json, or intake/<stem>/data.json). ` +
+			`Run \`lawnlord import <zip> --case-dir ${CASE_DIR}\` first.`,
+	);
+}
+
+const INTAKE_DIR = resolveIntakeDir();
+
+// Serve a file from the intake dir under a fixed subdir, blocking path escapes.
+function serveFromIntake(sub: string, rest: string): Response {
+	const decoded = decodeURIComponent(rest);
+	if (decoded.includes("..")) return new Response("Forbidden", { status: 403 });
+	const file = Bun.file(join(INTAKE_DIR, sub, decoded));
+	return new Response(file);
+}
+
+const server = Bun.serve({
+	port: PORT,
+	development: { hmr: true, console: true },
+	routes: {
+		"/": index,
+		// The Actual-lens payload, straight from the DuckDB mirror via the CLI.
+		"/api/case": async () => {
+			const out = await Bun.$`uv run lawnlord export-actual --case-dir ${CASE_DIR}`
+				.cwd(REPO_ROOT)
+				.quiet()
+				.text();
+			return new Response(out, {
+				headers: { "content-type": "application/json" },
+			});
+		},
+	},
+	async fetch(req) {
+		const url = new URL(req.url);
+		if (url.pathname.startsWith("/files/")) {
+			return serveFromIntake("files", url.pathname.slice("/files/".length));
+		}
+		if (url.pathname.startsWith("/pages/")) {
+			return serveFromIntake("pages", url.pathname.slice("/pages/".length));
+		}
+		return new Response("Not found", { status: 404 });
+	},
+});
+
+console.log(`lawnlord Actual lens → ${server.url}`);
+console.log(`case: ${CASE_DIR}\nintake: ${INTAKE_DIR}`);

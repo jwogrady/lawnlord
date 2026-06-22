@@ -1,0 +1,218 @@
+:root {
+	--ink: #0b0e06;
+	--panel: #11160a;
+	--line: #2a340b;
+	--cream: #ece3cc;
+	--muted: #8a936f;
+	--gold: #cfa13f;
+	--gold-deep: #bb8527;
+	--grass: #4a7a22;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+body {
+	margin: 0;
+	background: var(--ink);
+	color: var(--cream);
+	font:
+		15px/1.5 Inter,
+		system-ui,
+		sans-serif;
+}
+
+header#top {
+	position: sticky;
+	top: 0;
+	z-index: 5;
+	display: flex;
+	align-items: flex-end;
+	justify-content: space-between;
+	gap: 1rem;
+	padding: 0.75rem 1.25rem;
+	background: var(--panel);
+	border-bottom: 1px solid var(--line);
+}
+
+#caseheader h1 {
+	margin: 0;
+	font-size: 1.15rem;
+	color: var(--gold);
+}
+
+#caseheader .meta {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.75rem;
+	font-size: 0.85rem;
+	color: var(--muted);
+}
+
+#lenses {
+	display: flex;
+	gap: 0.25rem;
+}
+
+.lensbtn {
+	background: transparent;
+	border: 1px solid var(--line);
+	color: var(--cream);
+	padding: 0.3rem 0.7rem;
+	border-radius: 5px;
+	cursor: pointer;
+}
+
+.lensbtn.on {
+	background: var(--gold);
+	color: var(--ink);
+	border-color: var(--gold-deep);
+}
+
+main#app {
+	display: grid;
+	grid-template-columns: 280px 1fr;
+	gap: 1.25rem;
+	padding: 1.25rem;
+	align-items: start;
+}
+
+.parties {
+	position: sticky;
+	top: 72px;
+}
+
+.parties h2,
+.register h2 {
+	font-size: 0.8rem;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	color: var(--muted);
+}
+
+.parties ul {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+
+.parties li {
+	padding: 0.4rem 0;
+	border-bottom: 1px solid var(--line);
+	font-size: 0.9rem;
+}
+
+.controls {
+	display: flex;
+	gap: 0.5rem;
+	align-items: center;
+	margin-bottom: 0.75rem;
+}
+
+.controls input,
+.controls select {
+	background: var(--panel);
+	border: 1px solid var(--line);
+	color: var(--cream);
+	padding: 0.4rem 0.6rem;
+	border-radius: 5px;
+}
+
+.controls input {
+	flex: 1;
+}
+
+.controls .count {
+	color: var(--muted);
+	font-size: 0.85rem;
+}
+
+table.roa {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 0.88rem;
+}
+
+table.roa th,
+table.roa td {
+	text-align: left;
+	padding: 0.45rem 0.6rem;
+	border-bottom: 1px solid var(--line);
+	vertical-align: top;
+}
+
+table.roa th {
+	position: sticky;
+	top: 72px;
+	background: var(--panel);
+	color: var(--gold);
+	cursor: pointer;
+	user-select: none;
+	white-space: nowrap;
+}
+
+.nowrap {
+	white-space: nowrap;
+}
+
+.muted {
+	color: var(--muted);
+}
+
+td.docs {
+	display: flex;
+	flex-direction: column;
+	gap: 0.25rem;
+}
+
+.doclink {
+	background: var(--forest, #1e3a12);
+	border: 1px solid var(--line);
+	color: var(--cream);
+	padding: 0.25rem 0.5rem;
+	border-radius: 4px;
+	cursor: pointer;
+	text-align: left;
+}
+
+.doclink:hover {
+	border-color: var(--gold);
+}
+
+.pdfpane {
+	margin-top: 1rem;
+	border: 1px solid var(--line);
+	border-radius: 6px;
+	overflow: hidden;
+}
+
+.pdfbar {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding: 0.4rem 0.7rem;
+	background: var(--panel);
+	font-size: 0.8rem;
+	color: var(--muted);
+}
+
+.pdfbar button {
+	background: transparent;
+	border: 1px solid var(--line);
+	color: var(--cream);
+	border-radius: 4px;
+	cursor: pointer;
+}
+
+iframe.pdf,
+iframe.snap {
+	width: 100%;
+	height: 78vh;
+	border: 0;
+	background: #fff;
+}
+
+.snapshot {
+	grid-column: 1 / -1;
+}

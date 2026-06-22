@@ -22,6 +22,12 @@ can be reimplemented cleanly over the zip (see the [ROADMAP](ROADMAP.md) *Reimpl
 
 ### Added
 
+- **Actual lens — the Odyssey-faithful viewer** (foundation F2, #93). A local Bun viewer that
+  reproduces the portal from the DuckDB **mirror** (not by re-parsing the zip): case header, parties,
+  and the register of actions as a **sortable / filterable** table; each filing opens as its **native
+  PDF** with deep-link paging; an "Odyssey snapshot" lens renders the captured `pages/*.html` verbatim
+  for side-by-side verification. The lens ends at the image. Data comes from a new read-only
+  `lawnlord export-actual` (queries the mirror → JSON). Launch: `cd web && CASE_DIR=<case> bun dev`.
 - **`lawnlord import <zip>` — the zip → DuckDB reader** (foundation F1, #92). Extracts a rake intake
   zip safely, **validates `data.json` against the bundled `schema.json`** (fail loud on drift or on
   >1 case), maps it into the `CaseModel`, and builds the per-case DuckDB. The DuckDB schema is now the
