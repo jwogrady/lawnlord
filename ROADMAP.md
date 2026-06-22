@@ -58,6 +58,7 @@ These constrain every issue below. (See [`docs/contributing.md`](docs/contributi
 
 | Version | What | Links |
 |---|---|---|
+| **0.4.0** | Foundation — zip import → DuckDB mirror + Actual & Exploded lenses (F1–F5): faithful Odyssey reproduction, PDF explosion to page PNGs, append-only AI transcription with fidelity, and the Exploded lens switcher. | Milestone [v0.4.0 (#8)](https://github.com/jwogrady/lawnlord/milestone/8) · Tag [v0.4.0](https://github.com/jwogrady/lawnlord/releases/tag/v0.4.0) · Issues [#92](https://github.com/jwogrady/lawnlord/issues/92)–[#96](https://github.com/jwogrady/lawnlord/issues/96) |
 | **0.3.0** | Complete-truth schema + bundle capstone — auto-OCR, BM25 search, lossless reassembly proof, field-complete mirror readers, canonical `case.json` v2.0, DuckDB standard schema, `lawnlord bundle`. | Milestone [v0.3.0 (#1)](https://github.com/jwogrady/lawnlord/milestone/1) · Tag [v0.3.0](https://github.com/jwogrady/lawnlord/releases/tag/v0.3.0) · Issues [#14](https://github.com/jwogrady/lawnlord/issues/14)–[#20](https://github.com/jwogrady/lawnlord/issues/20) |
 | **0.2.0** | Case workspace + Odyssey adapter, DuckDB index, `lawnlord query`, OCR, folder source. | Release [v0.2.0](https://github.com/jwogrady/lawnlord/releases/tag/v0.2.0) |
 | **0.1.0** | The deterministic exploder: `archive → submission → document → section → page` with provenance, 4-tier boundary detection, curation overlay, `--force` review preservation. | _Never tagged or released (see Release hygiene)_ |
@@ -81,54 +82,9 @@ Build top to bottom. Each milestone depends on the one above it.
 > on top of the two foundational views, and their additive pieces will be **reimplemented over the
 > zip** (see *Reimplementation backlog*). The principle is unchanged: mirror exactly, then add.
 
-### v0.4.0 — Foundation: zip import + Actual & Exploded lenses
-[Milestone #8](https://github.com/jwogrady/lawnlord/milestone/8) · *Recreate exactly the views the
-zip's pages already contain — nothing additive. Each page of the zip is the data-view contract. The
-substrate that cross-referencing, case linking, and argument tagging build on, so it ships first and
-alone.* Five ordered, codify-sized steps (each builds on the last):
-
-- **[F1 · #92](https://github.com/jwogrady/lawnlord/issues/92) — Import the zip → CaseModel + DuckDB**
-  *(un-stubs `workspace.from_intake`)*. The DuckDB schema is the **relational mirror of the zip** —
-  `data.json`, formally described by the zip's own `schema.json`:
-  - **Read** — extract the zip safely (`is_suspicious_entry` on every entry), **validate `data.json`
-    against the bundled `schema.json`** (fail loud if the zip drifts from its own contract), then map
-    into `models.CaseModel`. This replaces the deleted provider adapters.
-  - **Honor the schema, don't codegen from it** — `schema.json` is the contract to validate against;
-    the relational DDL is hand-authored (JSON-Schema→SQL auto-generation is brittle: nested arrays
-    become child tables, and every field is typed `string`).
-  - **Mirror stores values verbatim** — `schema.json` types everything as `string`
-    (`"Page Count": "6"`, `"366.00"`, `"09/05/2025"`); the mirror keeps the raw strings — that *is*
-    the immutable base. Typed/normalized values (numbers, ISO dates) are a **derived/additive** view,
-    never the mirror (keeps "mirror exactly, then add" honest at the DB layer).
-  - **Re-scope the schema to the zip** — keep the seven tables that mirror `data.json`
-    (`cases`, `parties`, `events`, `images`, `image_events`, `financials`, `financial_transactions`);
-    **drop the four inherited additive tables** (`documents`, `chunks`, `extracted_dates`,
-    `knowledge_documents`). The page-text/transcription layer returns at F3/F4 as a clearly-additive
-    layer, not in the mirror.
-  - Bump `SCHEMA_VERSION`; per-case DBs are regenerable, so no in-place migration.
-- **[F2 · #93](https://github.com/jwogrady/lawnlord/issues/93) — Actual lens ("as if logged into
-  Odyssey").** A faithful reproduction of the portal: case header (caption, court, judge, status,
-  filed date), parties, and the register of actions as a **sortable / filterable** case-history table
-  (date · type · party · page count · linked doc). Each filing opens as its **native PDF** (selectable
-  text, real paging — *not* a render), deep-link paged (`#page=N&view=FitH`). **Ends at the image.**
-  Also renders the captured `pages/*.html` verbatim for true snapshot parity. Purpose: visually
-  verify LawnLord matches Odyssey.
-- **[F3 · #94](https://github.com/jwogrady/lawnlord/issues/94) — Explode the images.** Split each
-  filed PDF into its documents and pages; render each page to a PNG; persist an **additive**
-  documents/pages index (never mutating the F1 mirror). Surface declared-vs-rendered page-count
-  mismatches (flagged, never hidden).
-- **[F4 · #95](https://github.com/jwogrady/lawnlord/issues/95) — Transcribe each page.** PNG render →
-  **AI transcription** (not OCR — materially more accurate); append-only (rev 0 immutable); a per-page
-  **transcription-vs-image fidelity** signal (the honest reframing of the folded #70). Cloud opt-in
-  (`ANTHROPIC_API_KEY`).
-- **[F5 · #96](https://github.com/jwogrady/lawnlord/issues/96) — Exploded lens.** Lens switch Actual ↔
-  Exploded; navigate case → filing → image → page; page image **beside its transcription**; document
-  grouping; integrity flags.
-
 > **Lenses as labels.** Every issue carries `lens:*` / `layer:*` labels (`lens:actual`,
 > `lens:exploded`, `lens:defense`, `lens:plaintiff`, `layer:foundation`, `layer:platform`) so the
-> tracker reads by lens as well as by milestone. Deferred: the Plaintiff lens, the lens-switcher as
-> its own issue, and the analysis-mechanism split — out of the foundation loop on purpose.
+> tracker reads by lens as well as by milestone.
 
 ### v0.4.0 (superseded) — Canonical "is" layer
 [Milestone #2 (closed)](https://github.com/jwogrady/lawnlord/milestone/2) · **Superseded by the alpha
