@@ -6,12 +6,15 @@ function of the intake zip, fully regenerable. It never authors content.
 if needed) the per-case database file.
 
 Vocabulary (glossary in docs/schema.md): an **image** is a filed PDF (the
-court's leaf). The schema is the **relational mirror of the zip's** ``data.json``
+court's leaf). The **mirror** is the relational mirror of the zip's ``data.json``
 — seven tables: ``cases``, ``parties``, ``events``, ``images``, ``image_events``,
 ``financials``, ``financial_transactions`` — all populated by
-:mod:`lawnlord.ingest` from the validated ``CaseModel``. The Exploded lens (its
-documents/pages + transcription) and any analysis arrive later as clearly
-additive layers, not in this mirror.
+:mod:`lawnlord.ingest` from the validated ``CaseModel``.
+
+On top of the mirror sits the **Exploded layer** — ``documents`` (one per image)
+and ``pages`` (one per rendered page, with its PNG pointer), populated by
+:mod:`lawnlord.explode`. It is additive: it references the mirror's images but
+never mutates them. Transcription text and analysis are later additive layers.
 """
 
 from __future__ import annotations
@@ -20,13 +23,14 @@ from pathlib import Path
 
 import duckdb
 
-# v7 (alpha pivot): re-scoped to the zip standard — the schema is now exactly the
+# v7 (alpha pivot): re-scoped to the zip standard — the mirror is exactly the
 # relational mirror of data.json (the seven tables above). The pre-pivot additive
-# tables (case_gaps, documents, chunks, extracted_dates, knowledge_documents) and
-# the cases.confidence scoring column were dropped; they belonged to the removed
-# explosion/reconstruction/confidence layers. Per-case DBs are regenerable, so the
-# bump needs no in-place migration.
-SCHEMA_VERSION = 7
+# tables and the cases.confidence column were dropped.
+# v8 (F3): the Exploded layer — `documents` (one per image) + `pages` (one per
+# rendered page, with its PNG pointer) — added on top of the mirror. Additive:
+# references the mirror's images, never mutates them.
+# Per-case DBs are regenerable, so bumps need no in-place migration.
+SCHEMA_VERSION = 8
 
 # One statement per table; CREATE ... IF NOT EXISTS keeps apply_schema idempotent.
 _SCHEMA_STATEMENTS = (
@@ -118,6 +122,29 @@ _SCHEMA_STATEMENTS = (
         image_id TEXT NOT NULL,
         event_id TEXT NOT NULL,
         PRIMARY KEY (image_id, event_id)
+    )
+    """,
+    # --- Exploded layer (additive; references images, never mutates them) ---
+    """
+    CREATE TABLE IF NOT EXISTS documents (
+        id TEXT PRIMARY KEY,
+        case_id TEXT NOT NULL,
+        image_id TEXT NOT NULL,
+        title TEXT,
+        page_count INTEGER,
+        created_at TEXT
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS pages (
+        id TEXT PRIMARY KEY,
+        case_id TEXT NOT NULL,
+        image_id TEXT NOT NULL,
+        document_id TEXT NOT NULL,
+        page_number INTEGER NOT NULL,
+        page_image_path TEXT,
+        page_image_sha256 TEXT,
+        created_at TEXT
     )
     """,
 )

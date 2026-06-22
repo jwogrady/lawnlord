@@ -136,7 +136,7 @@ def test_import_populates_duckdb(tmp_path):
     }
 
 
-def test_schema_has_only_the_seven_mirror_tables(tmp_path):
+def test_schema_has_the_seven_mirror_tables(tmp_path):
     con = main.open_case_db(tmp_path / "lawnlord.duckdb")
     main.apply_schema(con)
     tables = {
@@ -145,10 +145,12 @@ def test_schema_has_only_the_seven_mirror_tables(tmp_path):
         ).fetchall()
     }
     con.close()
-    assert tables == {
+    # The mirror is always present; the Exploded layer (documents, pages) is
+    # additive on top (F3), so the mirror is a subset, not the whole set.
+    assert {
         "schema_meta", "cases", "parties", "events", "images",
         "image_events", "financials", "financial_transactions",
-    }
+    } <= tables
 
 
 # --- validation -----------------------------------------------------------

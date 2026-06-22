@@ -15,6 +15,7 @@ from __future__ import annotations
 from .cli import main
 from .console import console
 from .db import SCHEMA_VERSION, apply_schema, open_case_db
+from .explode import explode_case
 from .export import export_actual
 from .hashing import now_iso, sha256_bytes, sha256_file
 from .ingest import ingest_case
@@ -46,5 +47,11 @@ from .models import (
     unique_slug,
 )
 from .models import FILES_DIRNAME
-from .reader import captured_at, extract_zip, load_case_model, validate_data
+from .reader import (
+    captured_at,
+    extract_zip,
+    find_intake_dir,
+    load_case_model,
+    validate_data,
+)
 from .workspace import OUTPUT_SUBDIRS, Case
