@@ -34,12 +34,20 @@ type Payload = {
 	documents: Doc[];
 };
 
+// Exploded lens — images → documents → pages, with transcription beside each page.
+type ExPage = { pageNumber: number; png: string; text: string | null; fidelity: number | null };
+type ExDoc = { title: string; pageCount: number | null; pages: ExPage[] };
+type ExImage = { imageId: string; title: string; filename: string; documents: ExDoc[] };
+type Exploded = { images: ExImage[] };
+
 const app = document.getElementById("app") as HTMLElement;
 const headerEl = document.getElementById("caseheader") as HTMLElement;
 const lensesEl = document.getElementById("lenses") as HTMLElement;
 
 let data: Payload;
-let lens: "register" | "snapshot" = "register";
+let exploded: Exploded | null = null; // lazily fetched on first switch to the Exploded lens
+let exImageId = ""; // the image selected in the Exploded lens
+let lens: "register" | "snapshot" | "exploded" = "register";
 let sortKey: "date" | "event" | "party" | "section" = "date";
 let sortDir: 1 | -1 = 1;
 let filterText = "";
@@ -201,10 +209,72 @@ function renderSnapshot(): void {
   </section>`;
 }
 
+async function renderExploded(): Promise<void> {
+	if (exploded === null) {
+		app.innerHTML = '<p class="muted">Loading exploded pages…</p>';
+		exploded = (await (await fetch("/api/exploded")).json()) as Exploded;
+	}
+	const images = exploded.images;
+	if (!images.length) {
+		app.innerHTML =
+			'<p class="muted">No exploded pages yet. Run <code>lawnlord explode</code> (and <code>transcribe</code>) first.</p>';
+		return;
+	}
+	if (!exImageId || !images.some((i) => i.imageId === exImageId)) {
+		exImageId = images[0].imageId;
+	}
+	const cur = images.find((i) => i.imageId === exImageId) as ExImage;
+
+	const rail = images
+		.map(
+			(i) =>
+				`<button class="docitem${i.imageId === exImageId ? " cur" : ""}" data-img="${esc(i.imageId)}">
+        <span class="doctitle">${esc(i.title || i.filename)}</span>
+        <span class="docmeta muted">${i.documents.reduce((n, d) => n + d.pages.length, 0)} pp</span>
+      </button>`,
+		)
+		.join("");
+
+	const docs = cur.documents
+		.map((d) => {
+			const pages = d.pages
+				.map(
+					(p) => `<div class="exrow">
+            <figure class="exfig">
+              <figcaption>p.${p.pageNumber}</figcaption>
+              <img loading="lazy" src="/png/${p.png.split("/").map(encodeURIComponent).join("/")}" alt="page ${p.pageNumber}" />
+            </figure>
+            <div class="extext">
+              ${
+								p.text
+									? `<div class="exmeta muted">transcription${p.fidelity != null ? ` · fidelity ${p.fidelity.toFixed(2)}` : ""}</div><pre>${esc(p.text)}</pre>`
+									: '<div class="exmeta muted">no transcription yet — run <code>lawnlord transcribe</code></div>'
+							}
+            </div>
+          </div>`,
+				)
+				.join("");
+			return `<section class="exdoc"><h3>${esc(d.title)}</h3>${pages}</section>`;
+		})
+		.join("");
+
+	app.innerHTML = `
+    <aside class="docs"><div class="docs-h">Filed images — ${esc(data.case.number)}</div>${rail}</aside>
+    <section class="exploded">${docs}</section>`;
+
+	for (const b of app.querySelectorAll(".docitem")) {
+		(b as HTMLButtonElement).onclick = () => {
+			exImageId = (b as HTMLElement).dataset.img as string;
+			renderExploded();
+		};
+	}
+}
+
 function render(): void {
 	renderHeader();
 	renderLensToggle();
 	if (lens === "snapshot") renderSnapshot();
+	else if (lens === "exploded") void renderExploded();
 	else renderRegister();
 }
 

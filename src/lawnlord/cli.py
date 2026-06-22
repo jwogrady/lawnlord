@@ -23,7 +23,7 @@ from rich.table import Table
 from .console import console
 from .db import apply_schema, open_case_db
 from .explode import explode_case
-from .export import export_actual
+from .export import export_actual, export_exploded
 from .ingest import ingest_case
 from .intake import load_intake, scaffold
 from .reader import captured_at, extract_zip, find_intake_dir
@@ -90,6 +90,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print the Actual-lens view (case + parties + register of actions) as JSON",
     )
     p_export.add_argument(
+        "--case-dir", default=".", help="Case root holding lawnlord.duckdb (default: cwd)"
+    )
+
+    p_export_x = sub.add_parser(
+        "export-exploded",
+        help="Print the Exploded-lens view (images → documents → pages + transcription) as JSON",
+    )
+    p_export_x.add_argument(
         "--case-dir", default=".", help="Case root holding lawnlord.duckdb (default: cwd)"
     )
 
@@ -188,6 +196,16 @@ def _main(argv: list[str] | None = None) -> None:
         con = open_case_db(Path(args.case_dir) / "lawnlord.duckdb", read_only=True)
         try:
             print(json.dumps(export_actual(con)))
+        finally:
+            con.close()
+        return
+
+    if args.command == "export-exploded":
+        import json
+
+        con = open_case_db(Path(args.case_dir) / "lawnlord.duckdb", read_only=True)
+        try:
+            print(json.dumps(export_exploded(con)))
         finally:
             con.close()
         return

@@ -22,6 +22,12 @@ can be reimplemented cleanly over the zip (see the [ROADMAP](ROADMAP.md) *Reimpl
 
 ### Added
 
+- **Exploded lens — browse inside each filed PDF** (foundation F5, #96). A third viewer lens
+  (Actual ↔ Odyssey snapshot ↔ **Exploded**): navigate case → image → document → page, with each
+  page's rendered PNG **beside its AI transcription** (and fidelity), or a "no transcription yet"
+  marker. Backed by a read-only `lawnlord export-exploded` (joins documents/pages/transcription →
+  JSON, latest revision per page) and a path-safe page-PNG route in the viewer. Completes the
+  post-pivot foundation (milestone v0.4.0).
 - **`lawnlord transcribe` — AI page transcription** (foundation F4, #95). PNG-per-page → Claude vision
   (`claude-opus-4-8`) transcription, persisted to an **append-only** `page_text` table (rev 0
   immutable; re-runs append a revision). Each row records a **fidelity** signal — the model's
