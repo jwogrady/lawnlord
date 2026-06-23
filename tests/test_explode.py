@@ -153,9 +153,12 @@ def test_export_exploded_shape(tmp_path):
     assert [(t["source"], t["model"]) for t in txns] == [
         ("pdf_text", None), ("ai", "gemma"), ("ai", "llava"),
     ]
+    # The pdf_text reading is the canonical anchor (ADR-0008): agreement 1.0,
+    # empty divergence, alongside the existing variation fields.
     assert txns[0] == {
         "source": "pdf_text", "model": None, "rev": 0,
         "createdAt": "t", "fidelity": 1.0, "text": "TRUTH",
+        "agreement": 1.0, "divergence": [],
     }
     assert txns[1]["text"] == "GEMMA" and txns[1]["rev"] == 1 and txns[1]["fidelity"] == 0.8
     assert txns[2]["text"] == "LLAVA"

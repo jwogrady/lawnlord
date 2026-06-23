@@ -23,7 +23,7 @@ from rich.table import Table
 from .console import console
 from .db import apply_schema, open_case_db
 from .explode import explode_case
-from .export import export_actual, export_exploded
+from .export import export_actual, export_exploded, export_metrics
 from .ingest import ingest_case
 from .intake import load_intake, scaffold
 from .reader import captured_at, extract_zip, find_intake_dir
@@ -120,6 +120,20 @@ def build_parser() -> argparse.ArgumentParser:
     x_level.add_argument("--image", metavar="IMAGE_ID", help="Scope to one image")
     x_level.add_argument("--document", metavar="DOCUMENT_ID", help="Scope to one document")
     x_level.add_argument("--page", metavar="PAGE_ID", help="Scope to one page")
+
+    p_metrics = sub.add_parser(
+        "export-metrics",
+        help="Print divergence/confidence aggregate metrics (coverage, mean "
+        "agreement, per-model fidelity distribution, flagged pages) rolled up at "
+        "the case and image levels, as JSON. ADR-0008.",
+    )
+    p_metrics.add_argument(
+        "--case-dir", default=".", help="Case root holding lawnlord.duckdb (default: cwd)"
+    )
+    p_metrics.add_argument(
+        "--image", metavar="IMAGE_ID", default=None,
+        help="Scope the rollup to a single image",
+    )
 
     p_explode = sub.add_parser(
         "explode",
@@ -346,6 +360,16 @@ def _main(argv: list[str] | None = None) -> None:
                 document_id=args.document,
                 page_id=args.page,
             )))
+        finally:
+            con.close()
+        return
+
+    if args.command == "export-metrics":
+        import json
+
+        con = open_case_db(Path(args.case_dir) / "lawnlord.duckdb", read_only=True)
+        try:
+            print(json.dumps(export_metrics(con, image_id=args.image)))
         finally:
             con.close()
         return
