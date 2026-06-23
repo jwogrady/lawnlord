@@ -33,7 +33,11 @@ import duckdb
 # references the mirror's images, never mutates them.
 # v9 (F4): `page_text` — append-only AI transcription per page (rev 0 immutable).
 # Per-case DBs are regenerable, so bumps need no in-place migration.
-SCHEMA_VERSION = 9
+# v10 (ADR-0005): re-key `page_text` on a surrogate `id` (content hash of
+# page_id|source|model|rev) so one page holds *every* transcription variation —
+# the PDF text layer plus one row per vision model — each individually
+# addressable, instead of a single (page_id, rev) lineage. Regenerable: re-import.
+SCHEMA_VERSION = 10
 
 # One statement per table; CREATE ... IF NOT EXISTS keeps apply_schema idempotent.
 _SCHEMA_STATEMENTS = (
@@ -150,10 +154,14 @@ _SCHEMA_STATEMENTS = (
         created_at TEXT
     )
     """,
-    # Append-only AI transcription per page: rev 0 is the original (immutable);
-    # re-transcription / human edits append a new rev. Never overwrites.
+    # Append-only AI transcription per page, keyed on a surrogate content-hash
+    # `id` (ADR-0005, v10) so a page holds every variation — the PDF text layer
+    # plus one row per vision model — each addressable. Append-only *per
+    # variation*: rev 0 of a given (page_id, source, model) is immutable; a re-run
+    # appends the next rev within that variation. Never overwrites.
     """
     CREATE TABLE IF NOT EXISTS page_text (
+        id TEXT PRIMARY KEY,
         case_id TEXT NOT NULL,
         page_id TEXT NOT NULL,
         rev INTEGER NOT NULL,
@@ -161,8 +169,7 @@ _SCHEMA_STATEMENTS = (
         text TEXT,
         fidelity DOUBLE,
         model TEXT,
-        created_at TEXT,
-        PRIMARY KEY (page_id, rev)
+        created_at TEXT
     )
     """,
 )

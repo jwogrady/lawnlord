@@ -14,6 +14,7 @@ Anthropic client is injectable so tests mock it (no network in CI).
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import random
 import time
@@ -65,11 +66,24 @@ _PROMPT = (
 )
 
 # The single append-only write into page_text, shared by the transcribe and
-# escalate passes (rev 0 immutable; every pass appends the next rev).
+# escalate passes (rev 0 of a variation immutable; every pass appends the next
+# rev within that variation). The surrogate `id` (ADR-0005) is computed via
+# `_row_id` so each (page_id, source, model, rev) variation is addressable.
 _PAGE_TEXT_INSERT = (
-    "INSERT INTO page_text (case_id, page_id, rev, source, text, fidelity, "
-    "model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    "INSERT INTO page_text (id, case_id, page_id, rev, source, text, fidelity, "
+    "model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
+
+
+def _row_id(page_id, source, model, rev) -> str:
+    """Stable surrogate id for one transcription variation: a content hash of
+    ``(page_id, source, model, rev)``. `model` is null for ``pdf_text``. Same
+    inputs → same id, so re-inserting an identical variation conflicts (rev 0
+    immutable) and the mirror stays deterministic."""
+    digest = hashlib.sha256(
+        f"{page_id}|{source}|{model or ''}|{rev}".encode()
+    ).hexdigest()
+    return "pt_" + digest[:16]
 
 
 def make_client():
@@ -351,7 +365,8 @@ def transcribe_case(
         # verbatim (fidelity 1.0, no model). Distinct from OCR; see ADR-0004.
         embedded = _embedded_text(intake_dir, intake_path, image_id, page_number, text_cache)
         if embedded is not None and len(embedded.strip()) >= MIN_PDF_TEXT_CHARS:
-            con.execute(_PAGE_TEXT_INSERT, [case_id, page_id, rev, "pdf_text", embedded,
+            con.execute(_PAGE_TEXT_INSERT, [_row_id(page_id, "pdf_text", None, rev),
+                                  case_id, page_id, rev, "pdf_text", embedded,
                                   1.0, None, generated_at])
             pdf_text += 1
             continue
@@ -381,7 +396,8 @@ def transcribe_case(
                 except Exception:
                     failed.append(page_id)
                     continue
-                con.execute(_PAGE_TEXT_INSERT, [case_id, page_id, rev, "ai", result["text"],
+                con.execute(_PAGE_TEXT_INSERT, [_row_id(page_id, "ai", result["model"], rev),
+                                      case_id, page_id, rev, "ai", result["text"],
                                       result["fidelity"], result["model"], generated_at])
                 done += 1
                 fidelity_sum += result["fidelity"]
@@ -455,7 +471,8 @@ def escalate_case(
                 except Exception:
                     failed.append(page_id)
                     continue
-                con.execute(_PAGE_TEXT_INSERT, [case_id, page_id, rev, "ai",
+                con.execute(_PAGE_TEXT_INSERT, [_row_id(page_id, "ai", result["model"], rev),
+                            case_id, page_id, rev, "ai",
                             result["text"], result["fidelity"], result["model"],
                             generated_at])
                 escalated += 1
