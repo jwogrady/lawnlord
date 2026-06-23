@@ -27,7 +27,7 @@ from .export import export_actual, export_exploded
 from .ingest import ingest_case
 from .intake import load_intake, scaffold
 from .reader import captured_at, extract_zip, find_intake_dir
-from .transcribe import DEFAULT_MODEL, make_client, transcribe_case
+from .transcribe import DEFAULT_MODEL, DEFAULT_WORKERS, make_client, transcribe_case
 from .workspace import Case
 
 
@@ -127,6 +127,10 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Re-transcribe pages that already have text (append a new revision); "
         "default skips them",
+    )
+    p_transcribe.add_argument(
+        "--workers", type=int, default=DEFAULT_WORKERS,
+        help=f"Concurrent vision-tier requests (default: {DEFAULT_WORKERS})",
     )
 
     return parser
@@ -268,6 +272,7 @@ def _main(argv: list[str] | None = None) -> None:
         stats = transcribe_case(
             con, pages_dir, generated_at, make_client(),
             model=args.model or DEFAULT_MODEL, force=args.force, intake_dir=intake_dir,
+            max_workers=args.workers,
         )
         con.close()
         table = Table(title="Transcribed (PDF text layer + vision fallback)")
@@ -280,5 +285,9 @@ def _main(argv: list[str] | None = None) -> None:
         console.print(table)
         if stats["skipped"]:
             console.print(f"[yellow]Skipped (no PNG):[/] {len(stats['skipped'])}")
+        if stats["failed"]:
+            console.print(
+                f"[red]Failed (vision error after retries):[/] {len(stats['failed'])}"
+            )
         console.print("[green]Done.[/]")
         return

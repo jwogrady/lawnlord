@@ -15,6 +15,9 @@ from __future__ import annotations
 
 import base64
 import json
+import random
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import duckdb
@@ -26,6 +29,16 @@ import pypdfium2 as pdfium
 # either <54 chars (stamps on image pages) or >=100 (born-digital text), nothing
 # between — so the exact cutoff in (53, 100] is not sensitive.
 MIN_PDF_TEXT_CHARS = 100
+
+# Vision-tier concurrency. Only the network-bound model calls run in the pool;
+# the local pre-pass and every DuckDB write stay on the calling thread (a DuckDB
+# connection is single-threaded), so insert order stays deterministic.
+DEFAULT_WORKERS = 8
+
+# Retry the vision call on transient API errors, with exponential backoff.
+_RETRY_ATTEMPTS = 4
+_RETRY_BASE_DELAY = 1.0
+_TRANSIENT_STATUS = frozenset({429, 500, 502, 503, 529})
 
 # Claude vision model. Confirmed current via the claude-api reference; override
 # with --model. Adaptive thinking is off by default on this model (omitted).
@@ -117,6 +130,34 @@ def extract_pdf_text(pdf_path: str | Path) -> list[str]:
         pdf.close()
 
 
+def _is_transient(exc: Exception) -> bool:
+    """A vision-call error worth retrying: an HTTP 429/5xx (rate limit /
+    overloaded / transient server) or a connection/timeout error."""
+    if getattr(exc, "status_code", None) in _TRANSIENT_STATUS:
+        return True
+    import anthropic
+
+    return isinstance(exc, (anthropic.APIConnectionError, anthropic.APITimeoutError))
+
+
+def _transcribe_page_with_retry(
+    png_path, client, model, attempts: int = _RETRY_ATTEMPTS,
+    base_delay: float = _RETRY_BASE_DELAY,
+) -> dict:
+    """``transcribe_page`` with exponential backoff on transient API errors. A
+    non-transient error, or the last attempt, re-raises for the caller to record."""
+    for attempt in range(attempts):
+        try:
+            return transcribe_page(png_path, client, model=model)
+        except Exception as exc:
+            if attempt + 1 >= attempts or not _is_transient(exc):
+                raise
+            # Exponential backoff with jitter, so concurrent workers don't retry
+            # in lockstep against a shared overloaded API.
+            delay = base_delay * (2 ** attempt)
+            time.sleep(delay * (0.5 + random.random()))
+
+
 def _embedded_text(intake_dir, intake_path, image_id, page_number, cache) -> str | None:
     """Embedded text for one page (1-based ``page_number``) of its source PDF, or
     ``None`` when the pre-pass cannot run (no intake dir, missing or unreadable
@@ -147,6 +188,7 @@ def transcribe_case(
     model: str = DEFAULT_MODEL,
     force: bool = False,
     intake_dir: str | Path | None = None,
+    max_workers: int = DEFAULT_WORKERS,
 ) -> dict:
     """Transcribe pages in the `pages` table, appending to `page_text`.
 
@@ -157,10 +199,17 @@ def transcribe_case(
     (``transcribe_page`` → ``source='ai'``), which needs the rendered PNG under
     ``pages_dir``.
 
+    The vision calls (network-bound) run concurrently in a bounded pool of
+    ``max_workers``, retried with backoff on transient API errors; a page that
+    still fails is reported in ``failed`` rather than aborting the run. Every
+    DuckDB write stays on the calling thread, and **each page is committed the
+    moment it finishes** — so an interrupted run keeps the pages already done and
+    a re-run costs only the rest. Output is read back in page/rev order, so the
+    completion order of the concurrent writes is not observable (ADR-0003).
+
     Resumable by default: a page that already has a `page_text` row is **skipped**
-    (only-missing), so re-running — or recovering an interrupted run — costs only
-    the pages still to do. ``force=True`` re-runs every page, appending the next
-    rev (rev 0 stays immutable; revisions are never overwritten).
+    (only-missing). ``force=True`` re-runs every page, appending the next rev
+    (rev 0 stays immutable; revisions are never overwritten).
     """
     pages_dir = Path(pages_dir)
     intake_dir = Path(intake_dir) if intake_dir is not None else None
@@ -170,12 +219,21 @@ def transcribe_case(
         "ORDER BY p.id"
     ).fetchall()
 
+    _INSERT = (
+        "INSERT INTO page_text (case_id, page_id, rev, source, text, fidelity, "
+        "model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    )
     done = 0
     pdf_text = 0
     fidelity_sum = 0.0
     skipped: list[str] = []
     skipped_existing: list[str] = []
+    failed: list[str] = []
     text_cache: dict[str, list[str] | None] = {}
+
+    # Phase 1 (sequential, page order): a born-digital page is committed now
+    # (its text is local and free); a page needing vision is queued for phase 2.
+    vision: list[tuple] = []
     for page_id, case_id, rel, image_id, page_number, intake_path in rows:
         prev = con.execute(
             "SELECT max(rev) FROM page_text WHERE page_id = ?", [page_id]
@@ -189,11 +247,8 @@ def transcribe_case(
         # verbatim (fidelity 1.0, no model). Distinct from OCR; see ADR-0004.
         embedded = _embedded_text(intake_dir, intake_path, image_id, page_number, text_cache)
         if embedded is not None and len(embedded.strip()) >= MIN_PDF_TEXT_CHARS:
-            con.execute(
-                "INSERT INTO page_text (case_id, page_id, rev, source, text, "
-                "fidelity, model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                [case_id, page_id, rev, "pdf_text", embedded, 1.0, None, generated_at],
-            )
+            con.execute(_INSERT, [case_id, page_id, rev, "pdf_text", embedded,
+                                  1.0, None, generated_at])
             pdf_text += 1
             continue
 
@@ -202,15 +257,30 @@ def transcribe_case(
         if not png.exists():
             skipped.append(rel)
             continue
-        result = transcribe_page(png, client, model=model)
-        con.execute(
-            "INSERT INTO page_text (case_id, page_id, rev, source, text, fidelity, "
-            "model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            [case_id, page_id, rev, "ai", result["text"], result["fidelity"],
-             result["model"], generated_at],
-        )
-        done += 1
-        fidelity_sum += result["fidelity"]
+        vision.append((page_id, case_id, rev, png))
+
+    # Phase 2 (concurrent): the network-bound vision calls. Each result is
+    # committed on this thread as its future completes, so progress is durable
+    # mid-run; a page that fails after retries is reported, not dropped.
+    if vision:
+        workers = max(1, min(max_workers, len(vision)))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            future_to_page = {
+                pool.submit(_transcribe_page_with_retry, png, client, model):
+                    (page_id, case_id, rev)
+                for (page_id, case_id, rev, png) in vision
+            }
+            for future in as_completed(future_to_page):
+                page_id, case_id, rev = future_to_page[future]
+                try:
+                    result = future.result()
+                except Exception:
+                    failed.append(page_id)
+                    continue
+                con.execute(_INSERT, [case_id, page_id, rev, "ai", result["text"],
+                                      result["fidelity"], result["model"], generated_at])
+                done += 1
+                fidelity_sum += result["fidelity"]
 
     return {
         "pages": done,
@@ -218,4 +288,5 @@ def transcribe_case(
         "avg_fidelity": (fidelity_sum / done) if done else 0.0,
         "skipped": skipped,
         "skipped_existing": skipped_existing,
+        "failed": failed,
     }
