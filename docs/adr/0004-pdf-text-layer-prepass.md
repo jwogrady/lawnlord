@@ -70,8 +70,8 @@ vision tier (local or cloud):
   accurate on the 149 born-digital pages. Rejected as the default.
 - **Use embedded text only as a fidelity cross-check, still OCR every page.**
   Keeps one path and gives an objective fidelity signal, but throws away the free
-  ground-truth and the ~97% cost/time win. Rejected; the cross-check is a possible
-  future refinement, not a reason to re-OCR.
+  ground-truth and the ~58% cost/time win (149 of 255 pages). Rejected; the
+  cross-check is a possible future refinement, not a reason to re-OCR.
 - **Put the pre-pass in `explode`.** Tempting since it reads PDFs there, but it
   would couple rendering to the text layer and write a transcription artifact from
   the render step. Rejected: `explode` renders; `transcribe` sources text.

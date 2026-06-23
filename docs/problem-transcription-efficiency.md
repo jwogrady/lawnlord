@@ -25,8 +25,7 @@ Worse, most of those calls are redundant. A measurement of this case found that
 **149 of 255 pages are born-digital and carry a rich embedded text layer; 106 are
 scanned/image-only** — the bulk of them inside two large filings (the 121-page
 Motion for Summary Judgment, 94 image pages; the 64-page Answer, 8 image pages).
-For a
-born-digital page the PDF already contains the *exact* text — so the current
+For a born-digital page the PDF already contains the *exact* text — so the current
 pipeline pays a frontier vision model to re-recognize pixels for text that is
 already present, verbatim, in the file. That is both wasted spend and *worse*
 output (OCR error introduced over ground truth). Re-OCR is genuinely required
