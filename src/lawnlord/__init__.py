@@ -58,7 +58,9 @@ from .transcribe import DEFAULT_MODEL as TRANSCRIBE_MODEL
 from .transcribe import (
     CloudTranscriber,
     LocalTranscriber,
+    escalate_case,
     extract_pdf_text,
+    measure_case,
     ollama_available,
     transcribe_case,
     transcribe_page,

@@ -33,7 +33,9 @@ from .transcribe import (
     DEFAULT_WORKERS,
     CloudTranscriber,
     LocalTranscriber,
+    escalate_case,
     make_client,
+    measure_case,
     ollama_available,
     transcribe_case,
 )
@@ -151,6 +153,34 @@ def build_parser() -> argparse.ArgumentParser:
     p_transcribe.add_argument(
         "--workers", type=int, default=DEFAULT_WORKERS,
         help=f"Concurrent vision-tier requests (default: {DEFAULT_WORKERS})",
+    )
+    p_transcribe.add_argument(
+        "--escalate-below", type=float, default=None, metavar="T",
+        help="After the pass, re-transcribe model pages with fidelity < T on cloud "
+        "Claude (appends a revision; needs ANTHROPIC_API_KEY). E.g. 0.9",
+    )
+
+    p_measure = sub.add_parser(
+        "measure",
+        help="Compare vision backends on a sample of image-only pages (read-only)",
+    )
+    p_measure.add_argument(
+        "--case-dir", default=".", help="Case root holding lawnlord.duckdb (default: cwd)"
+    )
+    p_measure.add_argument(
+        "--models", default=DEFAULT_LOCAL_MODEL,
+        help="Comma-separated local Ollama models to compare "
+        f"(default: {DEFAULT_LOCAL_MODEL})",
+    )
+    p_measure.add_argument(
+        "--cloud", action="store_true",
+        help="Also include cloud Claude in the comparison (needs ANTHROPIC_API_KEY)",
+    )
+    p_measure.add_argument(
+        "--sample", type=int, default=10, help="Image-only pages to sample (default: 10)"
+    )
+    p_measure.add_argument(
+        "--ollama-host", default=None, help="Ollama server (default: http://localhost:11434)"
     )
 
     return parser
@@ -318,6 +348,25 @@ def _main(argv: list[str] | None = None) -> None:
             con, pages_dir, generated_at, transcriber,
             force=args.force, intake_dir=intake_dir, max_workers=args.workers,
         )
+        # Fidelity-gated escalation: re-transcribe the local tier's weakest pages
+        # on cloud Claude (ADR-0001). Only meaningful when the pass ran locally.
+        esc = None
+        if args.escalate_below is not None:
+            if not isinstance(transcriber, LocalTranscriber):
+                console.print(
+                    "[yellow]--escalate-below applies to --backend local[/] "
+                    "(this pass was already cloud); skipping escalation."
+                )
+            elif not os.environ.get("ANTHROPIC_API_KEY"):
+                console.print(
+                    "[yellow]--escalate-below needs ANTHROPIC_API_KEY[/] for the "
+                    "cloud pass; skipping escalation."
+                )
+            else:
+                esc = escalate_case(
+                    con, pages_dir, generated_at, CloudTranscriber(make_client()),
+                    args.escalate_below, max_workers=args.workers,
+                )
         con.close()
         table = Table(title="Transcribed (PDF text layer + vision fallback)")
         table.add_column("Metric")
@@ -327,6 +376,11 @@ def _main(argv: list[str] | None = None) -> None:
         table.add_row("Pages transcribed (vision)", str(stats["pages"]))
         table.add_row("Skipped (already transcribed)", str(len(stats["skipped_existing"])))
         table.add_row("Avg fidelity (vision)", f"{stats['avg_fidelity']:.2f}")
+        if esc is not None:
+            table.add_row(
+                f"Escalated to cloud (fidelity < {args.escalate_below})",
+                f"{esc['escalated']} of {esc['candidates']}",
+            )
         console.print(table)
         if stats["skipped"]:
             console.print(f"[yellow]Skipped (no PNG):[/] {len(stats['skipped'])}")
@@ -335,4 +389,46 @@ def _main(argv: list[str] | None = None) -> None:
                 f"[red]Failed (vision error after retries):[/] {len(stats['failed'])}"
             )
         console.print("[green]Done.[/]")
+        return
+
+    if args.command == "measure":
+        case_dir = Path(args.case_dir).resolve()
+        transcribers: dict = {}
+        host = args.ollama_host
+        for m in (s.strip() for s in args.models.split(",") if s.strip()):
+            if ollama_available(m, host):
+                transcribers[m] = LocalTranscriber(model=m, host=host)
+            else:
+                console.print(f"[yellow]Skipping[/] local model '{m}' (not pulled/reachable).")
+        if args.cloud:
+            if os.environ.get("ANTHROPIC_API_KEY"):
+                transcribers[f"cloud:{DEFAULT_MODEL}"] = CloudTranscriber(make_client())
+            else:
+                console.print("[yellow]--cloud set but no ANTHROPIC_API_KEY[/] — omitting cloud.")
+        if not transcribers:
+            console.print("[red]No backends available to measure.[/]")
+            raise SystemExit(1)
+        pages_dir = case_dir / "extracted" / "pages"
+        con = open_case_db(case_dir / "lawnlord.duckdb", read_only=True)
+        intake_dir = find_intake_dir(case_dir)
+        try:
+            result = measure_case(con, pages_dir, transcribers, sample=args.sample,
+                                  intake_dir=intake_dir)
+        finally:
+            con.close()
+        labels = result["labels"]
+        table = Table(title=f"Backend comparison ({result['sampled']} image-only pages)")
+        table.add_column("Backend")
+        table.add_column("Avg fidelity", justify="right")
+        for t in (0.7, 0.8, 0.9, 0.95):
+            table.add_column(f"<{t}", justify="right")
+        for label in labels:
+            row = [label, f"{result['avg_fidelity'][label]:.3f}"]
+            row += [f"{result['escalation_fraction'][label][t]:.0%}" for t in (0.7, 0.8, 0.9, 0.95)]
+            table.add_row(*row)
+        console.print(table)
+        console.print(
+            "[dim]Columns <T = share of sampled pages that backend reads below "
+            "fidelity T (the fraction that would escalate at that threshold).[/]"
+        )
         return
