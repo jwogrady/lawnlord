@@ -14,6 +14,16 @@ closed.
 
 ### Added
 
+- **Fully-exploded QA comparison viewer** (#125). The Exploded lens is now a per-page comparison
+  grid that QA's the whole transcription corpus: each page image sits beside **one column per
+  variation present** — the PDF text layer and every vision model's reading — read straight from
+  `export-exploded` (never re-derived). The canonical record (the PDF text layer) is styled
+  **unmistakably apart** from derived AI readings so nothing derived can pass as the record, and
+  missing/failed/empty readings now show **explicitly** (an empty-string reading no longer renders
+  as "untranscribed"). Navigation spans all five levels — **case → filing → image → document →
+  page** — via a breadcrumb, with images grouped under the filings that filed them. To support the
+  filing level, `export-exploded` now carries each image's `filings` (the events that filed it, via
+  `image_events`) as read-only mirror data.
 - **Transcription provenance in the Exploded lens** (#108). `export-exploded` now carries each
   page's transcription `source` (`pdf_text` = exact text from the PDF's own layer, `ai` = a vision
   model's reading), `model`, and `fidelity` alongside the text — read-only, latest revision per

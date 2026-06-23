@@ -32,8 +32,9 @@ Two foundational views over the zip come first (see the [ROADMAP](ROADMAP.md)):
 1. **Actual view — "as if logged into Odyssey."** The case header, parties, and register of actions
    as a sortable/filterable case-history table; each filing opens as its **native PDF**. It ends at
    the image — for visually verifying the mirror matches the portal.
-2. **Exploded view — inside each filed PDF.** Case → filing → image → page, with each page
-   transcribed from a PNG render via AI (not OCR), shown beside the page image.
+2. **Exploded view — inside each filed PDF.** Navigate case → filing → image → document → page; each
+   page image sits beside a QA comparison grid of every transcription variation (the PDF text layer
+   plus each vision model), with the canonical record kept visually distinct from derived AI readings.
 
 Everything beyond these — cross-referencing, case linking, argument tagging, the analytical lenses —
 builds on that substrate and is sequenced in the ROADMAP.

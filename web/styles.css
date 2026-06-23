@@ -217,75 +217,169 @@ iframe.snap {
 	grid-column: 1 / -1;
 }
 
-/* Exploded lens */
-.docs {
-	position: sticky;
-	top: 72px;
-	max-height: 85vh;
-	overflow: auto;
-	display: flex;
-	flex-direction: column;
-	gap: 0.25rem;
+/* Exploded lens — the fully-exploded QA comparison viewer (#125). */
+.qa {
+	grid-column: 1 / -1;
 }
 
-.docs-h {
-	font-size: 0.8rem;
-	text-transform: uppercase;
-	letter-spacing: 0.05em;
+/* Breadcrumb across the five levels: case › filing › image › document › page. */
+.crumbs {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.4rem;
+	margin-bottom: 1rem;
+	padding-bottom: 0.6rem;
+	border-bottom: 1px solid var(--line);
+}
+
+.crumb {
+	background: transparent;
+	border: 1px solid var(--line);
+	color: var(--cream);
+	padding: 0.2rem 0.55rem;
+	border-radius: 5px;
+	cursor: pointer;
+	font-size: 0.82rem;
+}
+
+.crumb:last-child {
+	border-color: var(--gold-deep);
+	color: var(--gold);
+}
+
+.crumbs .sep {
 	color: var(--muted);
-	padding-bottom: 0.4rem;
 }
 
-.docitem {
+/* Drill-down cards at the case / filing / image levels. */
+.navgrid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+	gap: 0.75rem;
+}
+
+.navcard {
 	display: flex;
 	flex-direction: column;
-	gap: 0.15rem;
+	gap: 0.2rem;
 	text-align: left;
 	background: var(--panel);
 	border: 1px solid var(--line);
-	border-radius: 5px;
-	padding: 0.45rem 0.6rem;
+	border-radius: 6px;
+	padding: 0.6rem 0.75rem;
 	color: var(--cream);
 	cursor: pointer;
 }
 
-.docitem.cur {
-	border-left: 3px solid var(--gold);
+.navcard:hover {
+	border-color: var(--gold);
 }
 
-.exdoc h3 {
+.navtitle {
+	color: var(--gold);
+	font-weight: 600;
+}
+
+.navmeta {
+	font-size: 0.8rem;
+}
+
+/* The comparison grid: one page image, then one cell per variation. */
+.cmp-doc h3 {
 	font-size: 0.95rem;
 	color: var(--gold);
 	border-bottom: 1px solid var(--line);
 	padding-bottom: 0.3rem;
 }
 
-.exrow {
+.exlink {
+	background: transparent;
+	border: 0;
+	color: inherit;
+	font: inherit;
+	cursor: pointer;
+	padding: 0;
+	text-decoration: underline dotted;
+}
+
+.cmp-row {
 	display: grid;
-	grid-template-columns: minmax(220px, 360px) 1fr;
+	grid-template-columns: minmax(200px, 300px) 1fr;
 	gap: 1rem;
-	padding: 0.75rem 0;
+	padding: 0.85rem 0;
 	border-bottom: 1px solid var(--line);
 	align-items: start;
 }
 
-.exfig {
-	margin: 0;
+.cmp-focus .cmp-row {
+	border-bottom: 0;
 }
 
-.exfig figcaption {
+.cmp-img {
+	margin: 0;
+	position: sticky;
+	top: 72px;
+}
+
+.cmp-img figcaption {
 	font-size: 0.75rem;
 	color: var(--muted);
 	margin-bottom: 0.25rem;
 }
 
-.exfig img {
+.cmp-img img {
 	width: 100%;
 	border: 1px solid var(--line);
 	background: #fff;
 }
 
-.extext pre {
+/* Each variation gets its own column; they scroll horizontally if narrow. */
+.cmp-cells {
+	display: flex;
+	gap: 0.75rem;
+	overflow-x: auto;
+	padding-bottom: 0.4rem;
+}
+
+.cmp-cell {
+	flex: 1 0 240px;
+	min-width: 240px;
+	border: 1px solid var(--line);
+	border-radius: 6px;
+	padding: 0.5rem 0.6rem;
+	background: var(--panel);
+}
+
+/* Canonical truth (the record) is unmistakable; AI readings read as derived. */
+.cmp-cell.record {
+	border-color: var(--grass);
+	border-left: 4px solid var(--grass);
+	background: #14210b;
+}
+
+.cmp-cell.derived {
+	border-left: 4px solid var(--gold-deep);
+}
+
+.cmp-cell.missing {
+	border-style: dashed;
+	opacity: 0.7;
+}
+
+.cmp-head {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.4rem;
+	align-items: baseline;
+	margin-bottom: 0.35rem;
+}
+
+.cmp-meta {
+	font-size: 0.75rem;
+}
+
+.cmp-text {
 	white-space: pre-wrap;
 	word-break: break-word;
 	font:
@@ -293,14 +387,16 @@ iframe.snap {
 		SFMono-Regular,
 		Menlo,
 		monospace;
-	margin: 0.25rem 0 0;
+	margin: 0;
 }
 
-.exmeta {
-	font-size: 0.78rem;
+.cmp-empty {
+	font-size: 0.8rem;
+	font-style: italic;
+	color: var(--muted);
 }
 
-/* Transcription provenance: extracted ground truth vs an AI's reading. */
+/* Provenance badges: the record vs an AI reading vs a reading that never ran. */
 .badge {
 	display: inline-block;
 	padding: 0 0.4em;
@@ -310,7 +406,7 @@ iframe.snap {
 	border: 1px solid var(--line);
 }
 
-.badge-pdf {
+.badge-record {
 	background: var(--grass);
 	color: var(--cream);
 	border-color: var(--grass);
@@ -320,4 +416,10 @@ iframe.snap {
 	background: transparent;
 	color: var(--gold);
 	border-color: var(--gold-deep);
+}
+
+.badge-missing {
+	background: transparent;
+	color: var(--muted);
+	border-style: dashed;
 }

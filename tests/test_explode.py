@@ -169,6 +169,21 @@ def test_export_exploded_shape(tmp_path):
     assert pages[0]["png"].endswith("p001.png")
 
 
+def test_export_exploded_image_carries_filings(tmp_path):
+    # Each image carries the filings (events) that filed it, so the viewer can
+    # group case → filing → image without re-deriving (issue #125).
+    case_dir = _build(tmp_path, page_count="3", pdf_pages=3)
+    main.main(["explode", "--case-dir", str(case_dir)])
+    con = main.open_case_db(case_dir / "lawnlord.duckdb", read_only=True)
+    try:
+        image = main.export_exploded(con)["images"][0]
+    finally:
+        con.close()
+    assert [(f["event"], f["section"]) for f in image["filings"]] == [("Filed", "events")]
+    assert image["filings"][0]["date"] == "01/02/2025"
+    assert image["filings"][0]["id"]  # the event id, for filing-level navigation
+
+
 def test_export_page_scoped(tmp_path):
     case_dir = _build(tmp_path, page_count="3", pdf_pages=3)
     main.main(["explode", "--case-dir", str(case_dir)])
