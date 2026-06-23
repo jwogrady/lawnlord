@@ -64,6 +64,13 @@ _PROMPT = (
     "the image is)."
 )
 
+# The single append-only write into page_text, shared by the transcribe and
+# escalate passes (rev 0 immutable; every pass appends the next rev).
+_PAGE_TEXT_INSERT = (
+    "INSERT INTO page_text (case_id, page_id, rev, source, text, fidelity, "
+    "model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+)
+
 
 def make_client():
     """The default Anthropic client (reads ANTHROPIC_API_KEY from the env)."""
@@ -320,10 +327,6 @@ def transcribe_case(
         "ORDER BY p.id"
     ).fetchall()
 
-    _INSERT = (
-        "INSERT INTO page_text (case_id, page_id, rev, source, text, fidelity, "
-        "model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-    )
     done = 0
     pdf_text = 0
     fidelity_sum = 0.0
@@ -348,7 +351,7 @@ def transcribe_case(
         # verbatim (fidelity 1.0, no model). Distinct from OCR; see ADR-0004.
         embedded = _embedded_text(intake_dir, intake_path, image_id, page_number, text_cache)
         if embedded is not None and len(embedded.strip()) >= MIN_PDF_TEXT_CHARS:
-            con.execute(_INSERT, [case_id, page_id, rev, "pdf_text", embedded,
+            con.execute(_PAGE_TEXT_INSERT, [case_id, page_id, rev, "pdf_text", embedded,
                                   1.0, None, generated_at])
             pdf_text += 1
             continue
@@ -378,7 +381,7 @@ def transcribe_case(
                 except Exception:
                     failed.append(page_id)
                     continue
-                con.execute(_INSERT, [case_id, page_id, rev, "ai", result["text"],
+                con.execute(_PAGE_TEXT_INSERT, [case_id, page_id, rev, "ai", result["text"],
                                       result["fidelity"], result["model"], generated_at])
                 done += 1
                 fidelity_sum += result["fidelity"]
@@ -390,4 +393,154 @@ def transcribe_case(
         "skipped": skipped,
         "skipped_existing": skipped_existing,
         "failed": failed,
+    }
+
+
+def escalate_case(
+    con: duckdb.DuckDBPyConnection,
+    pages_dir: str | Path,
+    generated_at: str,
+    cloud_transcriber: Transcriber,
+    threshold: float,
+    max_workers: int = DEFAULT_WORKERS,
+) -> dict:
+    """Re-transcribe low-fidelity model pages on the cloud tier (ADR-0001).
+
+    Selects pages whose **latest** `page_text` rev is a model transcription
+    (``source='ai'``) with ``fidelity < threshold`` — born-digital pages
+    (``source='pdf_text'``, fidelity 1.0) are never escalated — and re-transcribes
+    each with ``cloud_transcriber``, appending the next rev. Append-only: the
+    local attempt is preserved as its own rev. Concurrent + durable like
+    :func:`transcribe_case`.
+    """
+    pages_dir = Path(pages_dir)
+    # Latest rev per page; keep only model pages (not pdf_text) below threshold
+    # that the cloud tier hasn't already produced — so a genuinely hard page the
+    # cloud also reads below T isn't re-escalated (and re-billed) on every run.
+    rows = con.execute(
+        "SELECT pt.case_id, pt.page_id, pt.rev, p.page_image_path "
+        "FROM page_text pt "
+        "JOIN pages p ON p.id = pt.page_id "
+        "JOIN (SELECT page_id, max(rev) AS mrev FROM page_text GROUP BY page_id) m "
+        "  ON m.page_id = pt.page_id AND m.mrev = pt.rev "
+        "WHERE pt.source = 'ai' AND pt.fidelity < ? "
+        "  AND (pt.model IS NULL OR pt.model != ?) "
+        "ORDER BY pt.page_id",
+        [threshold, cloud_transcriber.model],
+    ).fetchall()
+
+    targets = []
+    failed: list[str] = []
+    for case_id, page_id, rev, rel in rows:
+        png = pages_dir / rel
+        if not png.exists():
+            failed.append(page_id)
+            continue
+        targets.append((case_id, page_id, rev + 1, png))  # append the next rev
+
+    escalated = 0
+    fidelity_sum = 0.0
+    if targets:
+        workers = max(1, min(max_workers, len(targets)))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            future_to_page = {
+                pool.submit(_transcribe_with_retry, cloud_transcriber, png):
+                    (case_id, page_id, rev)
+                for (case_id, page_id, rev, png) in targets
+            }
+            for future in as_completed(future_to_page):
+                case_id, page_id, rev = future_to_page[future]
+                try:
+                    result = future.result()
+                except Exception:
+                    failed.append(page_id)
+                    continue
+                con.execute(_PAGE_TEXT_INSERT, [case_id, page_id, rev, "ai",
+                            result["text"], result["fidelity"], result["model"],
+                            generated_at])
+                escalated += 1
+                fidelity_sum += result["fidelity"]
+
+    return {
+        "candidates": len(rows),
+        "escalated": escalated,
+        "avg_fidelity": (fidelity_sum / escalated) if escalated else 0.0,
+        "failed": failed,
+    }
+
+
+def measure_case(
+    con: duckdb.DuckDBPyConnection,
+    pages_dir: str | Path,
+    transcribers: dict,
+    sample: int = 10,
+    intake_dir: str | Path | None = None,
+) -> dict:
+    """Compare vision backends on a sample of **image-only** pages — an analysis
+    tool to choose a local model and set the escalation threshold from data.
+
+    ``transcribers`` maps a label (e.g. ``"qwen2.5vl:7b"``) to a
+    :class:`Transcriber`. Samples up to ``sample`` pages whose embedded text is
+    thin/absent (the pages a vision tier actually handles; needs ``intake_dir``
+    to detect them, else samples the first pages), runs each through every
+    backend, and returns per-page fidelity per backend plus, for a range of
+    thresholds, the fraction of pages each backend would escalate. **Read-only:
+    never writes `page_text`.**
+    """
+    pages_dir = Path(pages_dir)
+    intake_dir = Path(intake_dir) if intake_dir is not None else None
+    rows = con.execute(
+        "SELECT p.id, p.page_image_path, p.image_id, p.page_number, i.intake_path "
+        "FROM pages p JOIN images i ON i.id = p.image_id ORDER BY p.id"
+    ).fetchall()
+
+    text_cache: dict[str, list[str] | None] = {}
+    sampled: list[tuple] = []  # (page_id, png)
+    for page_id, rel, image_id, page_number, intake_path in rows:
+        if len(sampled) >= sample:
+            break
+        if intake_dir is not None:
+            embedded = _embedded_text(intake_dir, intake_path, image_id, page_number, text_cache)
+            if embedded is not None and len(embedded.strip()) >= MIN_PDF_TEXT_CHARS:
+                continue  # born-digital — not a vision-tier page
+        png = pages_dir / rel
+        if png.exists():
+            sampled.append((page_id, png))
+
+    # Per page, transcribe with every backend (sequential — this is a deliberate
+    # offline measurement, not the hot path).
+    per_page: list[dict] = []
+    for page_id, png in sampled:
+        entry = {"page_id": page_id, "fidelity": {}, "chars": {}}
+        for label, transcriber in transcribers.items():
+            try:
+                out = transcriber.transcribe(png)
+                entry["fidelity"][label] = out["fidelity"]
+                entry["chars"][label] = len(out["text"])
+            except Exception as exc:
+                entry["fidelity"][label] = None
+                entry["chars"][label] = f"error: {type(exc).__name__}"
+        per_page.append(entry)
+
+    labels = list(transcribers)
+    avg_fidelity = {}
+    for label in labels:
+        vals = [e["fidelity"][label] for e in per_page if e["fidelity"].get(label) is not None]
+        avg_fidelity[label] = (sum(vals) / len(vals)) if vals else 0.0
+    # Escalation fraction: share of sampled pages a backend reads below each T.
+    thresholds = (0.7, 0.8, 0.9, 0.95)
+    escalation_fraction = {label: {} for label in labels}
+    n = len(per_page)
+    for label in labels:
+        for t in thresholds:
+            below = sum(1 for e in per_page
+                        if (f := e["fidelity"].get(label)) is not None and f < t)
+            escalation_fraction[label][t] = (below / n) if n else 0.0
+
+    return {
+        "sampled": n,
+        "labels": labels,
+        "per_page": per_page,
+        "avg_fidelity": avg_fidelity,
+        "escalation_fraction": escalation_fraction,
     }

@@ -348,3 +348,75 @@ def test_is_transient_classifies_cloud_and_local_errors():
     assert tx._is_transient(urllib.error.URLError("refused")) is True  # connection refused
     assert tx._is_transient(socket.timeout("read timed out")) is True
     assert tx._is_transient(ValueError("bad json")) is False  # non-transient → no retry
+
+
+def _seed_page_text(con, case_id, page_id, rev, source, fidelity, model, text="L"):
+    con.execute(
+        "INSERT INTO page_text (case_id, page_id, rev, source, text, fidelity, "
+        "model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [case_id, page_id, rev, source, text, fidelity, model, "t0"],
+    )
+
+
+def test_escalate_reruns_only_low_fidelity_model_pages(tmp_path):
+    # pdf_text (1.0) and high-fidelity model pages are left alone; only a
+    # low-fidelity model page is re-transcribed on cloud, appending a new rev.
+    case_dir = _exploded_case(tmp_path, pages=3)
+    con = main.open_case_db(case_dir / "lawnlord.duckdb")
+    main.apply_schema(con)
+    pid = [r[0] for r in con.execute("SELECT id FROM pages ORDER BY id").fetchall()]
+    case_id = con.execute("SELECT id FROM cases").fetchone()[0]
+    _seed_page_text(con, case_id, pid[0], 0, "pdf_text", 1.0, None)   # born-digital
+    _seed_page_text(con, case_id, pid[1], 0, "ai", 0.95, "local")     # good model read
+    _seed_page_text(con, case_id, pid[2], 0, "ai", 0.50, "local")     # weak model read
+
+    cloud = _cloud(_FakeClient(transcription="CLOUD", fidelity=0.99))
+    stats = main.escalate_case(con, case_dir / "extracted" / "pages", "t1", cloud, threshold=0.9)
+    rows = con.execute(
+        "SELECT page_id, rev, source, text FROM page_text ORDER BY page_id, rev"
+    ).fetchall()
+    con.close()
+
+    assert stats["candidates"] == 1 and stats["escalated"] == 1
+    by_page = {p: [r for r in rows if r[0] == p] for p in pid}
+    assert len(by_page[pid[0]]) == 1                       # pdf_text untouched
+    assert len(by_page[pid[1]]) == 1                       # 0.95 >= 0.9 untouched
+    assert [r[1] for r in by_page[pid[2]]] == [0, 1]       # weak page got a new rev
+    assert by_page[pid[2]][1][2] == "ai" and by_page[pid[2]][1][3] == "CLOUD"
+
+
+def test_escalation_does_not_re_escalate_cloud_pages(tmp_path):
+    # A page whose latest rev the cloud model already produced is NOT re-escalated
+    # even if still below T — no unbounded re-billing on genuinely hard pages.
+    case_dir = _exploded_case(tmp_path, pages=1)
+    con = main.open_case_db(case_dir / "lawnlord.duckdb")
+    main.apply_schema(con)
+    pid = con.execute("SELECT id FROM pages ORDER BY id").fetchone()[0]
+    case_id = con.execute("SELECT id FROM cases").fetchone()[0]
+    _seed_page_text(con, case_id, pid, 0, "ai", 0.50, main.TRANSCRIBE_MODEL)  # already cloud
+    cloud = _cloud(_FakeClient(transcription="CLOUD2", fidelity=0.6))         # cloud model = TRANSCRIBE_MODEL
+    stats = main.escalate_case(con, case_dir / "extracted" / "pages", "t1", cloud, threshold=0.9)
+    n = con.execute("SELECT count(*) FROM page_text").fetchone()[0]
+    con.close()
+    assert stats["candidates"] == 0 and stats["escalated"] == 0
+    assert n == 1                                          # no new rev appended
+
+
+def test_measure_compares_backends_without_writing(tmp_path):
+    case_dir = _exploded_case(tmp_path, pages=2)           # no intake_dir → sample all
+    con = main.open_case_db(case_dir / "lawnlord.duckdb")
+    main.apply_schema(con)
+    transcribers = {
+        "strong": _cloud(_FakeClient(transcription="x", fidelity=0.95)),
+        "weak": _cloud(_FakeClient(transcription="y", fidelity=0.60)),
+    }
+    result = main.measure_case(con, case_dir / "extracted" / "pages", transcribers, sample=2)
+    n_rows = con.execute("SELECT count(*) FROM page_text").fetchone()[0]
+    con.close()
+
+    assert result["sampled"] == 2
+    assert result["avg_fidelity"]["strong"] == 0.95
+    assert result["avg_fidelity"]["weak"] == 0.60
+    assert result["escalation_fraction"]["weak"][0.7] == 1.0   # 0.60 < 0.7 everywhere
+    assert result["escalation_fraction"]["strong"][0.7] == 0.0
+    assert n_rows == 0                                          # read-only: no page_text writes
