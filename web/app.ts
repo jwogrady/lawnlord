@@ -35,7 +35,14 @@ type Payload = {
 };
 
 // Exploded lens — images → documents → pages, with transcription beside each page.
-type ExPage = { pageNumber: number; png: string; text: string | null; fidelity: number | null };
+type ExPage = {
+	pageNumber: number;
+	png: string;
+	text: string | null;
+	source: string | null;
+	model: string | null;
+	fidelity: number | null;
+};
 type ExDoc = { title: string; pageCount: number | null; pages: ExPage[] };
 type ExImage = { imageId: string; title: string; filename: string; documents: ExDoc[] };
 type Exploded = { images: ExImage[] };
@@ -247,7 +254,11 @@ async function renderExploded(): Promise<void> {
             <div class="extext">
               ${
 								p.text
-									? `<div class="exmeta muted">transcription${p.fidelity != null ? ` · fidelity ${p.fidelity.toFixed(2)}` : ""}</div><pre>${esc(p.text)}</pre>`
+									? `<div class="exmeta muted">${
+											p.source === "pdf_text"
+												? '<span class="badge badge-pdf">PDF text layer</span> exact text from the file'
+												: `<span class="badge badge-ai">AI${p.model ? ` · ${esc(p.model)}` : ""}</span>${p.fidelity != null ? ` · fidelity ${p.fidelity.toFixed(2)}` : ""}`
+										}</div><pre>${esc(p.text)}</pre>`
 									: '<div class="exmeta muted">no transcription yet — run <code>lawnlord transcribe</code></div>'
 							}
             </div>
