@@ -4,6 +4,7 @@ The Anthropic client is mocked — no network in CI.
 """
 
 import json
+import threading
 from types import SimpleNamespace
 
 from pypdf import PdfWriter
@@ -32,13 +33,15 @@ class _FakeClient:
 
     def __init__(self, transcription="TRANSCRIBED TEXT", fidelity=0.95):
         self.calls = 0
+        self._lock = threading.Lock()  # vision tier now runs calls concurrently
         payload = json.dumps({"transcription": transcription, "fidelity": fidelity})
         resp = SimpleNamespace(content=[SimpleNamespace(type="text", text=payload)])
         outer = self
 
         class _Messages:
             def create(self, **kwargs):
-                outer.calls += 1
+                with outer._lock:
+                    outer.calls += 1
                 return resp
 
         self.messages = _Messages()
@@ -196,3 +199,81 @@ def test_cli_transcribe_is_opt_in(tmp_path, capsys, monkeypatch):
         assert con.execute("SELECT count(*) FROM page_text").fetchone()[0] == 0
     finally:
         con.close()
+
+
+def test_concurrent_vision_preserves_page_order(tmp_path):
+    # The vision calls run in a pool, but rows must be written in page-id order
+    # with no page lost or duplicated, regardless of completion order.
+    case_dir = _exploded_case(tmp_path, pages=5)            # no intake_dir → all vision
+    con = main.open_case_db(case_dir / "lawnlord.duckdb")
+    main.apply_schema(con)
+    client = _FakeClient(transcription="PAGE", fidelity=0.9)
+    stats = main.transcribe_case(con, case_dir / "extracted" / "pages", "t0",
+                                 client, max_workers=4)
+    pt_ids = [r[0] for r in con.execute(
+        "SELECT page_id FROM page_text ORDER BY page_id").fetchall()]
+    page_ids = [r[0] for r in con.execute(
+        "SELECT id FROM pages ORDER BY id").fetchall()]
+    con.close()
+    assert stats["pages"] == 5 and client.calls == 5
+    assert pt_ids == page_ids                              # all pages, in id order
+    assert len(set(pt_ids)) == 5                           # none duplicated
+
+
+def test_transient_error_retries_then_succeeds(tmp_path, monkeypatch):
+    import lawnlord.transcribe as tx
+    monkeypatch.setattr(tx.time, "sleep", lambda _s: None)  # no real backoff wait
+    case_dir = _exploded_case(tmp_path, pages=1)
+
+    class FlakyClient:
+        def __init__(self):
+            self.calls = 0
+            self.messages = self
+
+        def create(self, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                exc = RuntimeError("overloaded")
+                exc.status_code = 529                       # transient → retried
+                raise exc
+            return SimpleNamespace(content=[SimpleNamespace(
+                type="text", text=json.dumps({"transcription": "OK", "fidelity": 0.7}))])
+
+    con = main.open_case_db(case_dir / "lawnlord.duckdb")
+    main.apply_schema(con)
+    client = FlakyClient()
+    stats = main.transcribe_case(con, case_dir / "extracted" / "pages", "t0", client)
+    rows = con.execute("SELECT source, text FROM page_text").fetchall()
+    con.close()
+    assert client.calls == 2                                # failed once, then succeeded
+    assert stats["pages"] == 1 and stats["failed"] == []
+    assert rows[0] == ("ai", "OK")
+
+
+def test_permanent_failure_is_reported_not_dropped(tmp_path, monkeypatch):
+    # One born-digital page + one image-only page whose vision call always fails.
+    # The failure is reported, the run does not abort, and the other page lands.
+    import lawnlord.transcribe as tx
+    monkeypatch.setattr(tx.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(tx, "extract_pdf_text", lambda _p: ["BORN-DIGITAL " * 12, ""])
+    case_dir = _exploded_case(tmp_path, pages=2)
+    intake_dir = main.find_intake_dir(case_dir)
+
+    class FailingClient:
+        def __init__(self):
+            self.messages = self
+
+        def create(self, **kwargs):
+            raise RuntimeError("permanent boom")            # non-transient → no retry
+
+    con = main.open_case_db(case_dir / "lawnlord.duckdb")
+    main.apply_schema(con)
+    stats = main.transcribe_case(con, case_dir / "extracted" / "pages", "t0",
+                                 FailingClient(), intake_dir=intake_dir)
+    sources = [r[0] for r in con.execute(
+        "SELECT source FROM page_text ORDER BY page_id").fetchall()]
+    con.close()
+    assert stats["pdf_text"] == 1                           # born-digital page landed
+    assert stats["pages"] == 0
+    assert len(stats["failed"]) == 1                        # the image-only page
+    assert sources == ["pdf_text"]                          # failure dropped no good rows
