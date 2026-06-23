@@ -16,7 +16,14 @@ from .cli import main
 from .console import console
 from .db import SCHEMA_VERSION, apply_schema, open_case_db
 from .explode import explode_case
-from .export import export_actual, export_exploded
+from .export import (
+    export_actual,
+    export_document,
+    export_exploded,
+    export_filing,
+    export_image,
+    export_page,
+)
 from .hashing import now_iso, sha256_bytes, sha256_file
 from .ingest import ingest_case
 from .intake import (

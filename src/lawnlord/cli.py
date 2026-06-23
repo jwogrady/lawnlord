@@ -107,11 +107,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_export_x = sub.add_parser(
         "export-exploded",
-        help="Print the Exploded-lens view (images → documents → pages + transcription) as JSON",
+        help="Print the Exploded-lens view (images → documents → pages + every "
+        "transcription variation) as JSON. With no selector, the whole case; pass "
+        "one selector to scope to a single filing/image/document/page.",
     )
     p_export_x.add_argument(
         "--case-dir", default=".", help="Case root holding lawnlord.duckdb (default: cwd)"
     )
+    x_level = p_export_x.add_mutually_exclusive_group()
+    x_level.add_argument("--filing", metavar="EVENT_ID",
+                         help="Scope to one filing (event): its linked images, exploded")
+    x_level.add_argument("--image", metavar="IMAGE_ID", help="Scope to one image")
+    x_level.add_argument("--document", metavar="DOCUMENT_ID", help="Scope to one document")
+    x_level.add_argument("--page", metavar="PAGE_ID", help="Scope to one page")
 
     p_explode = sub.add_parser(
         "explode",
@@ -331,7 +339,13 @@ def _main(argv: list[str] | None = None) -> None:
 
         con = open_case_db(Path(args.case_dir) / "lawnlord.duckdb", read_only=True)
         try:
-            print(json.dumps(export_exploded(con)))
+            print(json.dumps(export_exploded(
+                con,
+                filing_id=args.filing,
+                image_id=args.image,
+                document_id=args.document,
+                page_id=args.page,
+            )))
         finally:
             con.close()
         return
