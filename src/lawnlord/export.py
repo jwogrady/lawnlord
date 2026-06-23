@@ -318,10 +318,33 @@ def export_document(con: duckdb.DuckDBPyConnection, document_id: str) -> dict:
     return {"document": doc}
 
 
+def _filings_by_image(
+    con: duckdb.DuckDBPyConnection, image_ids: list[str]
+) -> dict[str, list[dict]]:
+    """Map image_id → the filings (events) that filed it, via ``image_events``
+    (many-to-many: an image may appear under several filings). Each filing is
+    ``{id, date, event, section}``, in docket order — read-only mirror data so
+    the viewer can group case → filing → image without re-deriving anything."""
+    if not image_ids:
+        return {}
+    placeholders = ", ".join("?" for _ in image_ids)
+    by_image: dict[str, list[dict]] = {}
+    for r in _rows(
+        con,
+        "SELECT ie.image_id AS image_id, e.id AS id, e.date AS date, "
+        "e.event_type AS event, e.phase AS section "
+        "FROM image_events ie JOIN events e ON e.id = ie.event_id "
+        f"WHERE ie.image_id IN ({placeholders}) ORDER BY e.date, e.id",
+        image_ids,
+    ):
+        by_image.setdefault(r.pop("image_id"), []).append(r)
+    return by_image
+
+
 def _images_for(
     con: duckdb.DuckDBPyConnection, where: str = "", params: list | None = None
 ) -> list[dict]:
-    """Images (optionally scoped) with their documents → pages nested."""
+    """Images (optionally scoped) with their filings + documents → pages nested."""
     sql = "SELECT id AS imageId, title, filename FROM images"
     if where:
         sql += f" WHERE {where}"
@@ -334,7 +357,9 @@ def _images_for(
     docs_by_image: dict[str, list[dict]] = {}
     for d in _documents_for(con, f"image_id IN ({placeholders})", image_ids):
         docs_by_image.setdefault(d.pop("image_id"), []).append(d)
+    filings_by_image = _filings_by_image(con, image_ids)
     for img in images:
+        img["filings"] = filings_by_image.get(img["imageId"], [])
         img["documents"] = docs_by_image.get(img["imageId"], [])
     return images
 
@@ -388,8 +413,10 @@ def export_exploded(
     page, each page carrying *every* current transcription variation beside it
     in a ``transcriptions`` list.
 
-    With no selector this is the whole-case export ``{"images": [...]}``. Pass a
-    selector to scope to one node:
+    With no selector this is the whole-case export ``{"images": [...]}``. Each
+    image carries a ``filings`` list (the events that filed it, via
+    ``image_events``) so the viewer can group case → filing → image from one
+    read-only fetch. Pass a selector to scope to one node:
 
     - ``page_id`` → :func:`export_page`
     - ``document_id`` → :func:`export_document`

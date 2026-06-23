@@ -151,8 +151,12 @@ additive layer is rebuilt over the zip.
 - **Page pills** — one pill per declared page; clicking parks the viewer on that page.
 
 **Exploded-view UX**
-- **Case → filing → image → page rail**, grouping pages under their filed image (`filingGroups`).
-- **Page text beside the page image**, with the text source labelled.
+- **Case → filing → image → document → page navigation** — realized as the fully-exploded QA
+  comparison viewer ([#125](https://github.com/jwogrady/lawnlord/issues/125)): drill down by
+  breadcrumb, with images grouped under the filings that filed them.
+- **Every transcription variation beside the page image** — realized by #125: a per-page comparison
+  grid with one column per reading (the PDF text layer plus each vision model), the canonical record
+  styled unmistakably apart from derived AI readings, and missing/empty readings shown explicitly.
 - **Integrity surfaced, never hidden** — rendered vs declared page counts; mismatches flagged (⚑).
 
 **Additive layers (deferred — reimplement over the zip, per their milestones)**
