@@ -60,6 +60,7 @@ from .transcribe import (
     LocalTranscriber,
     escalate_case,
     extract_pdf_text,
+    installed_vision_models,
     measure_case,
     ollama_available,
     transcribe_case,
