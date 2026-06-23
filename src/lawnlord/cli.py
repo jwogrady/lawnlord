@@ -27,7 +27,16 @@ from .export import export_actual, export_exploded
 from .ingest import ingest_case
 from .intake import load_intake, scaffold
 from .reader import captured_at, extract_zip, find_intake_dir
-from .transcribe import DEFAULT_MODEL, DEFAULT_WORKERS, make_client, transcribe_case
+from .transcribe import (
+    DEFAULT_LOCAL_MODEL,
+    DEFAULT_MODEL,
+    DEFAULT_WORKERS,
+    CloudTranscriber,
+    LocalTranscriber,
+    make_client,
+    ollama_available,
+    transcribe_case,
+)
 from .workspace import Case
 
 
@@ -120,7 +129,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--case-dir", default=".", help="Case root holding lawnlord.duckdb (default: cwd)"
     )
     p_transcribe.add_argument(
-        "--model", default=None, help=f"Override the vision model (default: {DEFAULT_MODEL})"
+        "--backend", choices=("cloud", "local"), default="cloud",
+        help="Vision tier for image-only pages: 'cloud' (Claude, needs "
+        "ANTHROPIC_API_KEY) or 'local' (Ollama on the GPU). Default: cloud",
+    )
+    p_transcribe.add_argument(
+        "--model", default=None,
+        help=f"Override the vision model (cloud default: {DEFAULT_MODEL}; "
+        f"local default: {DEFAULT_LOCAL_MODEL})",
+    )
+    p_transcribe.add_argument(
+        "--ollama-host", default=None,
+        help="Ollama server for --backend local (default: http://localhost:11434)",
     )
     p_transcribe.add_argument(
         "--force",
@@ -134,6 +154,34 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     return parser
+
+
+def _resolve_transcriber(backend: str, model: str | None, ollama_host: str | None):
+    """Pick the vision backend, or return ``None`` (and print why) so the caller
+    skips. ``local`` needs Ollama + the model pulled; if either is missing it
+    falls back to cloud when ``ANTHROPIC_API_KEY`` is set, else skips."""
+    if backend == "local":
+        m = model or DEFAULT_LOCAL_MODEL
+        if ollama_available(m, ollama_host):
+            return LocalTranscriber(model=m, host=ollama_host)
+        if os.environ.get("ANTHROPIC_API_KEY"):
+            console.print(
+                f"[yellow]Local backend unavailable[/] (Ollama unreachable or "
+                f"'{m}' not pulled) — falling back to cloud Claude."
+            )
+            return CloudTranscriber(make_client(), model=DEFAULT_MODEL)
+        console.print(
+            f"[yellow]Local backend unavailable[/] (Ollama unreachable or '{m}' not "
+            "pulled) and no ANTHROPIC_API_KEY for cloud fallback. Skipped."
+        )
+        return None
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        console.print(
+            "[yellow]Transcription is cloud opt-in.[/] Set ANTHROPIC_API_KEY, or use "
+            "--backend local. Skipped."
+        )
+        return None
+    return CloudTranscriber(make_client(), model=model or DEFAULT_MODEL)
 
 
 def _load_dotenv() -> None:
@@ -258,11 +306,8 @@ def _main(argv: list[str] | None = None) -> None:
 
     if args.command == "transcribe":
         case_dir = Path(args.case_dir).resolve()
-        if not os.environ.get("ANTHROPIC_API_KEY"):
-            console.print(
-                "[yellow]Transcription is cloud opt-in.[/] Set ANTHROPIC_API_KEY to "
-                "enable the Claude vision pass. Skipped."
-            )
+        transcriber = _resolve_transcriber(args.backend, args.model, args.ollama_host)
+        if transcriber is None:
             return
         pages_dir = case_dir / "extracted" / "pages"
         con = open_case_db(case_dir / "lawnlord.duckdb")
@@ -270,14 +315,14 @@ def _main(argv: list[str] | None = None) -> None:
         intake_dir = find_intake_dir(case_dir)
         generated_at = captured_at(intake_dir)
         stats = transcribe_case(
-            con, pages_dir, generated_at, make_client(),
-            model=args.model or DEFAULT_MODEL, force=args.force, intake_dir=intake_dir,
-            max_workers=args.workers,
+            con, pages_dir, generated_at, transcriber,
+            force=args.force, intake_dir=intake_dir, max_workers=args.workers,
         )
         con.close()
         table = Table(title="Transcribed (PDF text layer + vision fallback)")
         table.add_column("Metric")
         table.add_column("Value", justify="right")
+        table.add_row("Vision backend", transcriber.model)
         table.add_row("Pages from PDF text layer", str(stats["pdf_text"]))
         table.add_row("Pages transcribed (vision)", str(stats["pages"]))
         table.add_row("Skipped (already transcribed)", str(len(stats["skipped_existing"])))

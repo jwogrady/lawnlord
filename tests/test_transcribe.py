@@ -47,6 +47,11 @@ class _FakeClient:
         self.messages = _Messages()
 
 
+def _cloud(client):
+    """Wrap a mock Anthropic client as the cloud Transcriber transcribe_case takes."""
+    return main.CloudTranscriber(client=client)
+
+
 def _exploded_case(tmp_path, pages=2):
     d = tmp_path / "intake"
     (d / "files").mkdir(parents=True)
@@ -71,7 +76,7 @@ def test_transcribe_case_appends_rev0(tmp_path):
     client = _FakeClient(transcription="PETITION ...", fidelity=0.9)
     try:
         stats = main.transcribe_case(con, case_dir / "extracted" / "pages",
-                                     "2026-01-01T00:00:00Z", client)
+                                     "2026-01-01T00:00:00Z", _cloud(client))
         rows = con.execute(
             "SELECT page_id, rev, source, text, fidelity FROM page_text ORDER BY page_id"
         ).fetchall()
@@ -90,12 +95,12 @@ def test_force_appends_a_revision(tmp_path):
 
     con = main.open_case_db(db)
     main.apply_schema(con)
-    main.transcribe_case(con, pages, "t0", _FakeClient(transcription="FIRST", fidelity=0.8))
+    main.transcribe_case(con, pages, "t0", _cloud(_FakeClient(transcription="FIRST", fidelity=0.8)))
     con.close()
 
     con = main.open_case_db(db)
     main.transcribe_case(con, pages, "t1",
-                         _FakeClient(transcription="SECOND", fidelity=0.7), force=True)
+                         _cloud(_FakeClient(transcription="SECOND", fidelity=0.7)), force=True)
     try:
         revs = con.execute(
             "SELECT rev, text FROM page_text ORDER BY rev"
@@ -116,12 +121,12 @@ def test_re_running_skips_already_transcribed_by_default(tmp_path):
 
     con = main.open_case_db(db)
     main.apply_schema(con)
-    main.transcribe_case(con, pages, "t0", _FakeClient(transcription="FIRST", fidelity=0.8))
+    main.transcribe_case(con, pages, "t0", _cloud(_FakeClient(transcription="FIRST", fidelity=0.8)))
     con.close()
 
     con = main.open_case_db(db)
     client = _FakeClient(transcription="SECOND", fidelity=0.7)
-    stats = main.transcribe_case(con, pages, "t1", client)
+    stats = main.transcribe_case(con, pages, "t1", _cloud(client))
     try:
         revs = con.execute("SELECT rev, text FROM page_text ORDER BY rev").fetchall()
     finally:
@@ -145,7 +150,7 @@ def test_born_digital_page_uses_pdf_text_layer(tmp_path, monkeypatch):
     main.apply_schema(con)
     client = _FakeClient()
     stats = main.transcribe_case(con, case_dir / "extracted" / "pages", "t0",
-                                 client, intake_dir=intake_dir)
+                                 _cloud(client), intake_dir=intake_dir)
     rows = con.execute("SELECT source, text, fidelity, model FROM page_text").fetchall()
     con.close()
     assert client.calls == 0                         # no vision call for born-digital
@@ -167,7 +172,7 @@ def test_image_only_page_falls_through_to_vision(tmp_path, monkeypatch):
     main.apply_schema(con)
     client = _FakeClient(transcription="VISION OCR", fidelity=0.6)
     stats = main.transcribe_case(con, case_dir / "extracted" / "pages", "t0",
-                                 client, intake_dir=intake_dir)
+                                 _cloud(client), intake_dir=intake_dir)
     rows = con.execute("SELECT source, text FROM page_text").fetchall()
     con.close()
     assert client.calls == 1                         # fell through to vision
@@ -202,14 +207,14 @@ def test_cli_transcribe_is_opt_in(tmp_path, capsys, monkeypatch):
 
 
 def test_concurrent_vision_preserves_page_order(tmp_path):
-    # The vision calls run in a pool, but rows must be written in page-id order
-    # with no page lost or duplicated, regardless of completion order.
+    # The vision calls run in a pool; read back in page-id order, every page is
+    # present exactly once regardless of completion order.
     case_dir = _exploded_case(tmp_path, pages=5)            # no intake_dir → all vision
     con = main.open_case_db(case_dir / "lawnlord.duckdb")
     main.apply_schema(con)
     client = _FakeClient(transcription="PAGE", fidelity=0.9)
     stats = main.transcribe_case(con, case_dir / "extracted" / "pages", "t0",
-                                 client, max_workers=4)
+                                 _cloud(client), max_workers=4)
     pt_ids = [r[0] for r in con.execute(
         "SELECT page_id FROM page_text ORDER BY page_id").fetchall()]
     page_ids = [r[0] for r in con.execute(
@@ -242,7 +247,7 @@ def test_transient_error_retries_then_succeeds(tmp_path, monkeypatch):
     con = main.open_case_db(case_dir / "lawnlord.duckdb")
     main.apply_schema(con)
     client = FlakyClient()
-    stats = main.transcribe_case(con, case_dir / "extracted" / "pages", "t0", client)
+    stats = main.transcribe_case(con, case_dir / "extracted" / "pages", "t0", _cloud(client))
     rows = con.execute("SELECT source, text FROM page_text").fetchall()
     con.close()
     assert client.calls == 2                                # failed once, then succeeded
@@ -269,7 +274,7 @@ def test_permanent_failure_is_reported_not_dropped(tmp_path, monkeypatch):
     con = main.open_case_db(case_dir / "lawnlord.duckdb")
     main.apply_schema(con)
     stats = main.transcribe_case(con, case_dir / "extracted" / "pages", "t0",
-                                 FailingClient(), intake_dir=intake_dir)
+                                 _cloud(FailingClient()), intake_dir=intake_dir)
     sources = [r[0] for r in con.execute(
         "SELECT source FROM page_text ORDER BY page_id").fetchall()]
     con.close()
@@ -277,3 +282,49 @@ def test_permanent_failure_is_reported_not_dropped(tmp_path, monkeypatch):
     assert stats["pages"] == 0
     assert len(stats["failed"]) == 1                        # the image-only page
     assert sources == ["pdf_text"]                          # failure dropped no good rows
+
+
+def test_local_transcriber_calls_ollama(tmp_path, monkeypatch):
+    # LocalTranscriber posts the page to Ollama's /api/chat and parses the
+    # schema-formatted JSON reply into {text, fidelity, model}.
+    import io
+    import urllib.request
+    import lawnlord.transcribe as tx
+
+    png = next((_exploded_case(tmp_path, pages=1) / "extracted" / "pages").rglob("*.png"))
+    captured = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["url"] = req.full_url
+        captured["body"] = json.loads(req.data)
+        reply = {"message": {"content": json.dumps(
+            {"transcription": "LOCAL OCR TEXT", "fidelity": 0.88})}}
+        return io.BytesIO(json.dumps(reply).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    out = tx.LocalTranscriber(model="qwen2.5vl:7b").transcribe(png)
+    assert out == {"text": "LOCAL OCR TEXT", "fidelity": 0.88, "model": "qwen2.5vl:7b"}
+    assert captured["url"].endswith("/api/chat")
+    assert captured["body"]["model"] == "qwen2.5vl:7b"
+    assert captured["body"]["messages"][0]["images"]        # the page image was attached
+
+
+def test_ollama_available_detects_pulled_model(monkeypatch):
+    import io
+    import urllib.request
+    import lawnlord.transcribe as tx
+
+    def tags(_req, timeout=None):
+        return io.BytesIO(json.dumps(
+            {"models": [{"name": "qwen2.5vl:7b"}, {"name": "minicpm-v:latest"}]}).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", tags)
+    assert tx.ollama_available("qwen2.5vl:7b") is True
+    assert tx.ollama_available("minicpm-v") is True          # bare name matches :latest
+    assert tx.ollama_available("llava:13b") is False
+
+    def boom(_req, timeout=None):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    assert tx.ollama_available("qwen2.5vl:7b") is False      # server down → not available

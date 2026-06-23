@@ -55,5 +55,12 @@ from .reader import (
     validate_data,
 )
 from .transcribe import DEFAULT_MODEL as TRANSCRIBE_MODEL
-from .transcribe import extract_pdf_text, transcribe_case, transcribe_page
+from .transcribe import (
+    CloudTranscriber,
+    LocalTranscriber,
+    extract_pdf_text,
+    ollama_available,
+    transcribe_case,
+    transcribe_page,
+)
 from .workspace import OUTPUT_SUBDIRS, Case
