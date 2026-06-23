@@ -1,6 +1,6 @@
 # ADR-0004: Embedded PDF text-layer pre-pass before any vision tier
 
-Status: Accepted
+Status: Accepted — cheapest-first short-circuit superseded by ADR-0006 (text-layer extraction retained)
 Date: 2026-06-22
 
 ## Context
