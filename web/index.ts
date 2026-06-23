@@ -83,13 +83,22 @@ const server = Bun.serve({
 		// on-image highlight renderer overlays (ADR-0009). Read-only.
 		"/api/regions": async (req) => {
 			const pageId = new URL(req.url).searchParams.get("page") ?? "";
-			const out = await Bun.$`uv run lawnlord export-regions --case-dir ${CASE_DIR} --page ${pageId}`
-				.cwd(REPO_ROOT)
-				.quiet()
-				.text();
-			return new Response(out, {
-				headers: { "content-type": "application/json" },
-			});
+			try {
+				const out = await Bun.$`uv run lawnlord export-regions --case-dir ${CASE_DIR} --page ${pageId}`
+					.cwd(REPO_ROOT)
+					.quiet()
+					.text();
+				return new Response(out, {
+					headers: { "content-type": "application/json" },
+				});
+			} catch (err) {
+				// A nonzero exit (bad page id, locked DB) becomes a 500 the client
+				// treats as transient — it stays text-only and retries, never caching.
+				return new Response(JSON.stringify({ pageId, regions: [], error: String(err) }), {
+					status: 500,
+					headers: { "content-type": "application/json" },
+				});
+			}
 		},
 	},
 	async fetch(req) {

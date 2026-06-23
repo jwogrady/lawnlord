@@ -420,9 +420,8 @@ function interactiveRecordBody(v: Variation): string {
 // same renderer with their own anchored regions — only spanIndex addressing is
 // assumed, nothing transcription-specific.
 type RegionOverlay = {
-	highlight(spanIndices: number[]): void; // exclusive "active" set
+	highlight(spanIndices: number[]): void; // exclusive "active" set (highlight([]) clears)
 	mark(spanIndices: number[], cls: string): void; // additive class (e.g. "diverged")
-	clear(): void;
 	onPick(cb: (spanIndex: number) => void): void;
 };
 function mountRegionOverlay(wrap: HTMLElement, regions: Region[]): RegionOverlay {
@@ -451,9 +450,6 @@ function mountRegionOverlay(wrap: HTMLElement, regions: Region[]): RegionOverlay
 		mark(spanIndices, cls) {
 			for (const i of spanIndices) boxes.get(i)?.classList.add(cls);
 		},
-		clear() {
-			for (const b of boxes.values()) b.classList.remove("active");
-		},
 		onPick(cb) {
 			pick = cb;
 		},
@@ -469,17 +465,31 @@ async function wireFocusPage(page: ExPage): Promise<void> {
 	if (!wrap) return;
 	let regions = regionsCache.get(page.id);
 	if (regions === undefined) {
+		// Only a successful read is cached; a transient failure (a 500 or a
+		// network error) is left uncached so the next focus on this page retries
+		// rather than being stuck text-only for the session.
 		try {
-			const pr = (await (await fetch(`/api/regions?page=${encodeURIComponent(page.id)}`)).json()) as PageRegions;
+			const res = await fetch(`/api/regions?page=${encodeURIComponent(page.id)}`);
+			if (!res.ok) return;
+			const pr = (await res.json()) as PageRegions;
 			regions = pr.regions.filter((r) => r.origin === "pdf_text");
 		} catch {
-			regions = [];
+			return;
 		}
 		regionsCache.set(page.id, regions);
 	}
+	// The fetch may have resolved after the user navigated away: only mount if
+	// this page is still the focused one and its wrapper is still in the live DOM.
+	if (exPageId !== page.id || !wrap.isConnected) return;
 	if (!regions.length) return; // graceful text-only fallback
 	const overlay = mountRegionOverlay(wrap, regions);
-	const toks = Array.from(app.querySelectorAll("[data-record] .tok")) as HTMLElement[];
+
+	// Record tokens indexed by ordinal for O(1) lookup (mirrors the box map).
+	const tokBySpan = new Map<number, HTMLElement>();
+	for (const el of app.querySelectorAll("[data-record] .tok")) {
+		const t = el as HTMLElement;
+		tokBySpan.set(Number(t.dataset.span), t);
+	}
 
 	// Diverged record tokens = the anchor-side of every AI reading's divergence
 	// spans (token-index ranges from the export — never re-diffed here).
@@ -490,23 +500,22 @@ async function wireFocusPage(page: ExPage): Promise<void> {
 			for (let i = s.anchor.start; i < s.anchor.end; i++) diverged.add(i);
 	}
 	overlay.mark([...diverged], "diverged");
-	for (const t of toks)
-		if (diverged.has(Number(t.dataset.span))) t.classList.add("diverged");
+	for (const i of diverged) tokBySpan.get(i)?.classList.add("diverged");
 
-	const setActive = (span: number | null) => {
-		for (const t of toks) t.classList.toggle("active", Number(t.dataset.span) === span);
-	};
-	overlay.onPick((span) => {
+	// One selection routine drives both directions, so clicking a word and
+	// clicking its box behave identically: highlight the box, activate the token,
+	// and reveal both (cheap — touches only the previously- and newly-active one).
+	let active: HTMLElement | null = null;
+	const select = (span: number) => {
 		overlay.highlight([span]);
-		setActive(span);
-		toks.find((t) => Number(t.dataset.span) === span)?.scrollIntoView({ block: "nearest" });
-	});
-	for (const t of toks)
-		t.onclick = () => {
-			const span = Number(t.dataset.span);
-			overlay.highlight([span]);
-			setActive(span);
-		};
+		active?.classList.remove("active");
+		active = tokBySpan.get(span) ?? null;
+		active?.classList.add("active");
+		active?.scrollIntoView({ block: "nearest" });
+		wrap.querySelector<HTMLElement>(`.region-box[data-span="${span}"]`)?.scrollIntoView({ block: "nearest" });
+	};
+	overlay.onPick(select);
+	for (const [span, t] of tokBySpan) t.onclick = () => select(span);
 }
 
 // The focused single page: the image with its region overlay beside the record
