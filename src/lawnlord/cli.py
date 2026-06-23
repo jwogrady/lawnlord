@@ -34,6 +34,7 @@ from .transcribe import (
     CloudTranscriber,
     LocalTranscriber,
     escalate_case,
+    installed_vision_models,
     make_client,
     measure_case,
     ollama_available,
@@ -131,9 +132,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--case-dir", default=".", help="Case root holding lawnlord.duckdb (default: cwd)"
     )
     p_transcribe.add_argument(
-        "--backend", choices=("cloud", "local"), default="cloud",
-        help="Vision tier for image-only pages: 'cloud' (Claude, needs "
-        "ANTHROPIC_API_KEY) or 'local' (Ollama on the GPU). Default: cloud",
+        "--backend", choices=("all", "cloud", "local"), default="all",
+        help="Which vision tier(s) read each page: 'all' (the default — cloud "
+        "Claude when ANTHROPIC_API_KEY is set, plus every installed Ollama vision "
+        "model; ADR-0006), 'cloud' (only Claude), or 'local' (only Ollama).",
     )
     p_transcribe.add_argument(
         "--model", default=None,
@@ -186,32 +188,57 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _resolve_transcriber(backend: str, model: str | None, ollama_host: str | None):
-    """Pick the vision backend, or return ``None`` (and print why) so the caller
-    skips. ``local`` needs Ollama + the model pulled; if either is missing it
-    falls back to cloud when ``ANTHROPIC_API_KEY`` is set, else skips."""
-    if backend == "local":
-        m = model or DEFAULT_LOCAL_MODEL
-        if ollama_available(m, ollama_host):
-            return LocalTranscriber(model=m, host=ollama_host)
-        if os.environ.get("ANTHROPIC_API_KEY"):
+def _build_transcribers(backend: str, model: str | None, ollama_host: str | None):
+    """The exhaustive set of vision backends for one transcribe pass (ADR-0006):
+    every available model reads every page. A ``CloudTranscriber`` when
+    ``ANTHROPIC_API_KEY`` is set, plus a ``LocalTranscriber`` per
+    ``installed_vision_models()`` entry.
+
+    ``--backend all`` (the default) is the exhaustive set; ``--backend cloud``
+    narrows to just the cloud tier; ``--backend local`` to just the local models;
+    ``--model M`` pins a single model on the chosen tier (cloud unless
+    ``--backend local``). Returns ``[]`` (the caller prints why and skips) when
+    nothing is available."""
+    has_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
+
+    # --model pins exactly one model on the chosen tier.
+    if model is not None:
+        if backend == "local":
+            if ollama_available(model, ollama_host):
+                return [LocalTranscriber(model=model, host=ollama_host)]
             console.print(
-                f"[yellow]Local backend unavailable[/] (Ollama unreachable or "
-                f"'{m}' not pulled) — falling back to cloud Claude."
+                f"[yellow]Local model '{model}' not pulled/reachable.[/] Skipped."
             )
-            return CloudTranscriber(make_client(), model=DEFAULT_MODEL)
+            return []
+        if has_key:
+            return [CloudTranscriber(make_client(), model=model)]
         console.print(
-            f"[yellow]Local backend unavailable[/] (Ollama unreachable or '{m}' not "
-            "pulled) and no ANTHROPIC_API_KEY for cloud fallback. Skipped."
+            "[yellow]Transcription is cloud opt-in.[/] Set ANTHROPIC_API_KEY, or "
+            "use --backend local. Skipped."
         )
-        return None
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        console.print(
-            "[yellow]Transcription is cloud opt-in.[/] Set ANTHROPIC_API_KEY, or use "
-            "--backend local. Skipped."
-        )
-        return None
-    return CloudTranscriber(make_client(), model=model or DEFAULT_MODEL)
+        return []
+
+    transcribers: list = []
+    if backend != "cloud":
+        for m in installed_vision_models(ollama_host):
+            transcribers.append(LocalTranscriber(model=m, host=ollama_host))
+    if backend != "local" and has_key:
+        transcribers.append(CloudTranscriber(make_client(), model=DEFAULT_MODEL))
+
+    if not transcribers:
+        if backend == "local":
+            console.print(
+                "[yellow]No local vision models installed[/] (Ollama unreachable "
+                "or none pulled). Skipped."
+            )
+        else:
+            # Default backend with no key and no local models: the cloud tier is
+            # opt-in, so say so (and point at the local alternative).
+            console.print(
+                "[yellow]Transcription is cloud opt-in.[/] Set ANTHROPIC_API_KEY, or "
+                "install a local Ollama vision model (--backend local). Skipped."
+            )
+    return transcribers
 
 
 def _load_dotenv() -> None:
@@ -336,26 +363,27 @@ def _main(argv: list[str] | None = None) -> None:
 
     if args.command == "transcribe":
         case_dir = Path(args.case_dir).resolve()
-        transcriber = _resolve_transcriber(args.backend, args.model, args.ollama_host)
-        if transcriber is None:
+        transcribers = _build_transcribers(args.backend, args.model, args.ollama_host)
+        if not transcribers:
             return
+        has_local = any(isinstance(t, LocalTranscriber) for t in transcribers)
         pages_dir = case_dir / "extracted" / "pages"
         con = open_case_db(case_dir / "lawnlord.duckdb")
         apply_schema(con)
         intake_dir = find_intake_dir(case_dir)
         generated_at = captured_at(intake_dir)
         stats = transcribe_case(
-            con, pages_dir, generated_at, transcriber,
+            con, pages_dir, generated_at, transcribers,
             force=args.force, intake_dir=intake_dir, max_workers=args.workers,
         )
         # Fidelity-gated escalation: re-transcribe the local tier's weakest pages
-        # on cloud Claude (ADR-0001). Only meaningful when the pass ran locally.
+        # on cloud Claude (ADR-0001). Only meaningful when a local model ran.
         esc = None
         if args.escalate_below is not None:
-            if not isinstance(transcriber, LocalTranscriber):
+            if not has_local:
                 console.print(
-                    "[yellow]--escalate-below applies to --backend local[/] "
-                    "(this pass was already cloud); skipping escalation."
+                    "[yellow]--escalate-below applies to local models[/] "
+                    "(this pass had none); skipping escalation."
                 )
             elif not os.environ.get("ANTHROPIC_API_KEY"):
                 console.print(
@@ -368,10 +396,11 @@ def _main(argv: list[str] | None = None) -> None:
                     args.escalate_below, max_workers=args.workers,
                 )
         con.close()
-        table = Table(title="Transcribed (PDF text layer + vision fallback)")
+        models = ", ".join(t.model for t in transcribers)
+        table = Table(title="Transcribed (PDF text layer + every vision model)")
         table.add_column("Metric")
         table.add_column("Value", justify="right")
-        table.add_row("Vision model", transcriber.model)
+        table.add_row("Vision models", models)
         table.add_row("Pages from PDF text layer", str(stats["pdf_text"]))
         table.add_row("Pages transcribed (vision)", str(stats["pages"]))
         table.add_row("Skipped (already transcribed)", str(len(stats["skipped_existing"])))

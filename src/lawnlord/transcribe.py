@@ -195,9 +195,10 @@ class LocalTranscriber:
         }
 
 
-def ollama_available(model: str = DEFAULT_LOCAL_MODEL, host: str | None = None) -> bool:
-    """True if the Ollama server is reachable and ``model`` is pulled — the gate
-    the CLI uses to decide local vs the cloud fallback."""
+def _ollama_tags(host: str | None = None) -> list[dict] | None:
+    """The raw ``/api/tags`` model list from the Ollama server, or ``None`` when
+    the server is unreachable. Shared by ``ollama_available`` and
+    ``installed_vision_models`` so both speak to the same endpoint identically."""
     import urllib.request
 
     host = (host or DEFAULT_OLLAMA_HOST).rstrip("/")
@@ -205,8 +206,17 @@ def ollama_available(model: str = DEFAULT_LOCAL_MODEL, host: str | None = None) 
         with urllib.request.urlopen(f"{host}/api/tags", timeout=3) as resp:
             tags = json.loads(resp.read())
     except Exception:
+        return None
+    return tags.get("models", [])
+
+
+def ollama_available(model: str = DEFAULT_LOCAL_MODEL, host: str | None = None) -> bool:
+    """True if the Ollama server is reachable and ``model`` is pulled — the gate
+    the CLI uses to decide local vs the cloud fallback."""
+    models = _ollama_tags(host)
+    if models is None:
         return False
-    names = {m.get("name", "") for m in tags.get("models", [])}
+    names = {m.get("name", "") for m in models}
     if model in names or f"{model}:latest" in names:
         return True
     # A bare name (no explicit ``:tag``) matches any pulled tag of that repo; an
@@ -215,6 +225,22 @@ def ollama_available(model: str = DEFAULT_LOCAL_MODEL, host: str | None = None) 
     if ":" not in model:
         return any(n.split(":", 1)[0] == model for n in names)
     return False
+
+
+def installed_vision_models(host: str | None = None) -> list[str]:
+    """Sorted names of pulled Ollama models that advertise ``"vision"`` among
+    their ``capabilities`` — the local set the exhaustive transcribe pass runs.
+    Returns ``[]`` when the server is unreachable (never raises), so the caller
+    degrades to whatever other backends are available."""
+    models = _ollama_tags(host)
+    if models is None:
+        return []
+    vision = [
+        m.get("name", "")
+        for m in models
+        if "vision" in (m.get("capabilities") or [])
+    ]
+    return sorted(n for n in vision if n)
 
 
 def extract_pdf_text(pdf_path: str | Path) -> list[str]:
@@ -303,36 +329,60 @@ def _embedded_text(intake_dir, intake_path, image_id, page_number, cache) -> str
     return texts[idx] if 0 <= idx < len(texts) else None
 
 
+def _next_rev(con, page_id, source, model) -> int | None:
+    """The next rev to write for one ``(page_id, source, model)`` variation, or
+    ``None`` if that variation already exists (caller skips unless forcing).
+    ``model`` is null for ``pdf_text`` — matched with ``IS NOT DISTINCT FROM`` so
+    NULL compares equal to NULL."""
+    prev = con.execute(
+        "SELECT max(rev) FROM page_text "
+        "WHERE page_id = ? AND source = ? AND model IS NOT DISTINCT FROM ?",
+        [page_id, source, model],
+    ).fetchone()[0]
+    return None if prev is None else prev + 1
+
+
 def transcribe_case(
     con: duckdb.DuckDBPyConnection,
     pages_dir: str | Path,
     generated_at: str,
-    transcriber: Transcriber,
+    transcriber: Transcriber | list[Transcriber] | tuple[Transcriber, ...],
     force: bool = False,
     intake_dir: str | Path | None = None,
     max_workers: int = DEFAULT_WORKERS,
 ) -> dict:
     """Transcribe pages in the `pages` table, appending to `page_text`.
 
-    Two sources, cheapest first. **Text-layer pre-pass (ADR-0004):** when
-    ``intake_dir`` is given, a born-digital page's exact text is read straight
-    from its PDF (``source='pdf_text'``, ``fidelity=1.0``, no model call). Only a
-    page with no usable embedded text falls through to the **vision tier** —
-    ``transcriber`` (cloud or local; ADR-0001/0002) → ``source='ai'`` — which
-    needs the rendered PNG under ``pages_dir``.
+    **Exhaustive (ADR-0006):** the corpus holds a reading from *every* available
+    backend on *every* page, for comparison — nothing is skipped because another
+    reading already exists. **Text-layer pre-pass (ADR-0004):** when ``intake_dir``
+    is given and a page is born-digital, its exact text is read straight from the
+    PDF (``source='pdf_text'``, ``fidelity=1.0``, no model call) — but this no
+    longer short-circuits the vision tier. Then *each* ``transcriber`` (cloud
+    and/or local; ADR-0001/0002) transcribes the page (``source='ai'``), needing
+    the rendered PNG under ``pages_dir``.
+
+    ``transcriber`` may be a single :class:`Transcriber` or a list of them
+    (normalized internally), so a single-backend caller still works.
 
     The vision calls (network-bound) run concurrently in a bounded pool of
-    ``max_workers``, retried with backoff on transient API errors; a page that
+    ``max_workers``, retried with backoff on transient API errors; a unit that
     still fails is reported in ``failed`` rather than aborting the run. Every
-    DuckDB write stays on the calling thread, and **each page is committed the
-    moment it finishes** — so an interrupted run keeps the pages already done and
-    a re-run costs only the rest. Output is read back in page/rev order, so the
-    completion order of the concurrent writes is not observable (ADR-0003).
+    DuckDB write stays on the calling thread, and **each unit is committed the
+    moment it finishes** — so an interrupted run keeps what's done and a re-run
+    costs only the rest. Output is read back in page/rev order, so completion
+    order of the concurrent writes is not observable (ADR-0003).
 
-    Resumable by default: a page that already has a `page_text` row is **skipped**
-    (only-missing). ``force=True`` re-runs every page, appending the next rev
-    (rev 0 stays immutable; revisions are never overwritten).
+    Resumable by default, **per ``(page, source, model)`` variation**: a variation
+    that already exists is skipped; a re-run fills only the missing ones (e.g. a
+    newly-installed model). ``force=True`` appends the next rev within each
+    variation (rev 0 stays immutable; revisions are never overwritten).
     """
+    transcribers = (
+        list(transcriber)
+        if isinstance(transcriber, (list, tuple))
+        else [transcriber]
+    )
     pages_dir = Path(pages_dir)
     intake_dir = Path(intake_dir) if intake_dir is not None else None
     rows = con.execute(
@@ -349,48 +399,53 @@ def transcribe_case(
     failed: list[str] = []
     text_cache: dict[str, list[str] | None] = {}
 
-    # Phase 1 (sequential, page order): a born-digital page is committed now
-    # (its text is local and free); a page needing vision is queued for phase 2.
+    # Phase 1 (sequential, page order): store the born-digital text layer now
+    # (local and free), then queue a vision unit for every transcriber that
+    # doesn't yet have a reading of this page. Skip/resume is per variation.
     vision: list[tuple] = []
     for page_id, case_id, rel, image_id, page_number, intake_path in rows:
-        prev = con.execute(
-            "SELECT max(rev) FROM page_text WHERE page_id = ?", [page_id]
-        ).fetchone()[0]
-        if prev is not None and not force:
-            skipped_existing.append(page_id)
-            continue
-        rev = 0 if prev is None else prev + 1
-
-        # Lever 0: a born-digital page already holds its exact text — store it
-        # verbatim (fidelity 1.0, no model). Distinct from OCR; see ADR-0004.
+        # Lever 0: a born-digital page holds its exact text — store it verbatim
+        # (fidelity 1.0, no model) as the `pdf_text` variation. Distinct from OCR;
+        # see ADR-0004. This no longer short-circuits the vision tier (ADR-0006).
         embedded = _embedded_text(intake_dir, intake_path, image_id, page_number, text_cache)
         if embedded is not None and len(embedded.strip()) >= MIN_PDF_TEXT_CHARS:
-            con.execute(_PAGE_TEXT_INSERT, [_row_id(page_id, "pdf_text", None, rev),
-                                  case_id, page_id, rev, "pdf_text", embedded,
-                                  1.0, None, generated_at])
-            pdf_text += 1
-            continue
+            rev = _next_rev(con, page_id, "pdf_text", None)
+            if rev is not None and not force:
+                skipped_existing.append(page_id)  # variation present → skip
+            else:
+                rev = 0 if rev is None else rev
+                con.execute(_PAGE_TEXT_INSERT, [_row_id(page_id, "pdf_text", None, rev),
+                                      case_id, page_id, rev, "pdf_text", embedded,
+                                      1.0, None, generated_at])
+                pdf_text += 1
 
-        # No usable text layer → vision tier (needs the rendered PNG).
+        # Vision tier (needs the rendered PNG): queue a unit per transcriber that
+        # is missing this page's variation (or forced).
         png = pages_dir / rel
-        if not png.exists():
-            skipped.append(rel)
-            continue
-        vision.append((page_id, case_id, rev, png))
+        for tr in transcribers:
+            rev = _next_rev(con, page_id, "ai", tr.model)
+            if rev is not None and not force:
+                skipped_existing.append(page_id)  # this (page, model) already read
+                continue
+            rev = 0 if rev is None else rev
+            if not png.exists():
+                skipped.append(rel)
+                continue
+            vision.append((page_id, case_id, rev, png, tr))
 
     # Phase 2 (concurrent): the network-bound vision calls. Each result is
     # committed on this thread as its future completes, so progress is durable
-    # mid-run; a page that fails after retries is reported, not dropped.
+    # mid-run; a unit that fails after retries is reported, not dropped.
     if vision:
         workers = max(1, min(max_workers, len(vision)))
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            future_to_page = {
-                pool.submit(_transcribe_with_retry, transcriber, png):
+            future_to_unit = {
+                pool.submit(_transcribe_with_retry, tr, png):
                     (page_id, case_id, rev)
-                for (page_id, case_id, rev, png) in vision
+                for (page_id, case_id, rev, png, tr) in vision
             }
-            for future in as_completed(future_to_page):
-                page_id, case_id, rev = future_to_page[future]
+            for future in as_completed(future_to_unit):
+                page_id, case_id, rev = future_to_unit[future]
                 try:
                     result = future.result()
                 except Exception:
@@ -404,6 +459,7 @@ def transcribe_case(
 
     return {
         "pages": done,
+        "ai": done,
         "pdf_text": pdf_text,
         "avg_fidelity": (fidelity_sum / done) if done else 0.0,
         "skipped": skipped,

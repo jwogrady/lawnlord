@@ -138,9 +138,10 @@ def test_re_running_skips_already_transcribed_by_default(tmp_path):
     assert revs[0][1] == "FIRST"                     # untouched
 
 
-def test_born_digital_page_uses_pdf_text_layer(tmp_path, monkeypatch):
-    # Lever 0: a page with a rich embedded text layer is stored verbatim from the
-    # PDF (source='pdf_text', fidelity 1.0, model NULL) with NO model call.
+def test_born_digital_page_stores_pdf_text_and_still_runs_vision(tmp_path, monkeypatch):
+    # ADR-0006: the PDF text layer is still stored verbatim (source='pdf_text',
+    # fidelity 1.0, model NULL), but it no longer short-circuits the vision tier —
+    # every model also reads the page, so the corpus can compare them.
     import lawnlord.transcribe as tx
     case_dir = _exploded_case(tmp_path, pages=1)
     intake_dir = main.find_intake_dir(case_dir)
@@ -148,17 +149,19 @@ def test_born_digital_page_uses_pdf_text_layer(tmp_path, monkeypatch):
 
     con = main.open_case_db(case_dir / "lawnlord.duckdb")
     main.apply_schema(con)
-    client = _FakeClient()
+    client = _FakeClient(transcription="VISION", fidelity=0.7)
     stats = main.transcribe_case(con, case_dir / "extracted" / "pages", "t0",
                                  _cloud(client), intake_dir=intake_dir)
-    rows = con.execute("SELECT source, text, fidelity, model FROM page_text").fetchall()
+    rows = con.execute(
+        "SELECT source, text, fidelity, model FROM page_text ORDER BY source").fetchall()
     con.close()
-    assert client.calls == 0                         # no vision call for born-digital
-    assert stats["pdf_text"] == 1 and stats["pages"] == 0
-    assert rows[0][0] == "pdf_text"
-    assert rows[0][2] == 1.0
-    assert rows[0][3] is None                        # model NULL
-    assert "BORN-DIGITAL" in rows[0][1]
+    assert client.calls == 1                         # vision STILL runs (exhaustive)
+    assert stats["pdf_text"] == 1 and stats["pages"] == 1
+    # Both variations coexist on the one page.
+    by_source = {r[0]: r for r in rows}
+    assert by_source["pdf_text"][2] == 1.0 and by_source["pdf_text"][3] is None
+    assert "BORN-DIGITAL" in by_source["pdf_text"][1]
+    assert by_source["ai"][1] == "VISION" and by_source["ai"][3] == main.TRANSCRIBE_MODEL
 
 
 def test_image_only_page_falls_through_to_vision(tmp_path, monkeypatch):
@@ -189,11 +192,16 @@ def test_transcribe_page_sends_image_and_parses(tmp_path):
 
 
 def test_cli_transcribe_is_opt_in(tmp_path, capsys, monkeypatch):
-    # No ANTHROPIC_API_KEY → clear skip, no crash, no rows. Hermetic: chdir to a
-    # dir with no .env so the CLI's .env autoload can't supply a key (a key in a
-    # project .env counts as opting in — see _load_dotenv).
+    # ADR-0006 default (--backend all): the exhaustive pass runs cloud-when-keyed
+    # PLUS every installed local vision model. With NEITHER a key NOR any local
+    # model, there is nothing to run → clean skip ("opt-in"), no crash, no rows.
+    # Hermetic: chdir to a dir with no .env so the CLI's .env autoload can't
+    # supply a key, and stub Ollama discovery so a real local server (if the dev
+    # box happens to run one) can't make this non-hermetic.
+    import lawnlord.cli as cli
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "installed_vision_models", lambda *_a, **_k: [])
     case_dir = _exploded_case(tmp_path, pages=1)
     capsys.readouterr()
     main.main(["transcribe", "--case-dir", str(case_dir)])
@@ -280,8 +288,10 @@ def test_permanent_failure_is_reported_not_dropped(tmp_path, monkeypatch):
     con.close()
     assert stats["pdf_text"] == 1                           # born-digital page landed
     assert stats["pages"] == 0
-    assert len(stats["failed"]) == 1                        # the image-only page
-    assert sources == ["pdf_text"]                          # failure dropped no good rows
+    # ADR-0006: every page gets a vision unit now, so BOTH fail (the born-digital
+    # page's vision read and the image-only page's). Failures dropped no good rows.
+    assert len(stats["failed"]) == 2
+    assert sources == ["pdf_text"]                          # only the free text layer survived
 
 
 def test_local_transcriber_calls_ollama(tmp_path, monkeypatch):
@@ -332,6 +342,99 @@ def test_ollama_available_detects_pulled_model(monkeypatch):
 
     monkeypatch.setattr(urllib.request, "urlopen", boom)
     assert tx.ollama_available("qwen2.5vl:7b") is False      # server down → not available
+
+
+def test_installed_vision_models_filters_by_capability(monkeypatch):
+    # ADR-0006 discovery: returns the SORTED names of pulled models whose
+    # capabilities advertise "vision"; a non-vision model is excluded.
+    import io
+    import urllib.request
+    import lawnlord.transcribe as tx
+
+    def tags(_req, timeout=None):
+        return io.BytesIO(json.dumps({"models": [
+            {"name": "qwen2.5vl:7b", "capabilities": ["completion", "vision"]},
+            {"name": "minicpm-v:latest", "capabilities": ["vision"]},
+            {"name": "llama3:8b", "capabilities": ["completion"]},   # no vision
+            {"name": "gemma3:4b"},                                   # no capabilities key
+        ]}).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", tags)
+    assert tx.installed_vision_models() == ["minicpm-v:latest", "qwen2.5vl:7b"]
+
+
+def test_installed_vision_models_unreachable_returns_empty(monkeypatch):
+    import urllib.request
+    import lawnlord.transcribe as tx
+
+    def boom(_req, timeout=None):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(urllib.request, "urlopen", boom)
+    assert tx.installed_vision_models() == []                # never raises → []
+
+
+def test_exhaustive_runs_every_model_on_every_page(tmp_path, monkeypatch):
+    # ADR-0006: each page ends with a pdf_text variation PLUS one ai row per
+    # supplied model — every model reads every page, none skipped.
+    import lawnlord.transcribe as tx
+    case_dir = _exploded_case(tmp_path, pages=2)
+    intake_dir = main.find_intake_dir(case_dir)
+    # Born-digital so the pdf_text variation lands too (both pages from one PDF).
+    monkeypatch.setattr(tx, "extract_pdf_text",
+                        lambda _p: ["BORN-DIGITAL " * 12, "BORN-DIGITAL " * 12])
+
+    con = main.open_case_db(case_dir / "lawnlord.duckdb")
+    main.apply_schema(con)
+    a = main.CloudTranscriber(client=_FakeClient(transcription="A", fidelity=0.8), model="model-a")
+    b = main.CloudTranscriber(client=_FakeClient(transcription="B", fidelity=0.9), model="model-b")
+    stats = main.transcribe_case(con, case_dir / "extracted" / "pages", "t0",
+                                 [a, b], intake_dir=intake_dir)
+    rows = con.execute(
+        "SELECT page_id, source, model FROM page_text ORDER BY page_id, source, model"
+    ).fetchall()
+    page_ids = [r[0] for r in con.execute("SELECT id FROM pages ORDER BY id").fetchall()]
+    con.close()
+
+    assert stats["pdf_text"] == 2 and stats["pages"] == 4   # 2 pages × 2 models
+    # Each page: exactly {pdf_text/None, ai/model-a, ai/model-b}.
+    for pid in page_ids:
+        got = {(r[1], r[2]) for r in rows if r[0] == pid}
+        assert got == {("pdf_text", None), ("ai", "model-a"), ("ai", "model-b")}
+
+
+def test_resume_is_per_variation(tmp_path):
+    # ADR-0006 resume: a re-run with a model already present adds nothing for it,
+    # but a newly-added model fills its missing variation on every page.
+    case_dir = _exploded_case(tmp_path, pages=2)           # no intake_dir → all vision
+    db = case_dir / "lawnlord.duckdb"
+    pages = case_dir / "extracted" / "pages"
+
+    con = main.open_case_db(db)
+    main.apply_schema(con)
+    a1 = main.CloudTranscriber(client=_FakeClient(transcription="A", fidelity=0.8), model="model-a")
+    stats1 = main.transcribe_case(con, pages, "t0", [a1])
+    con.close()
+    assert stats1["pages"] == 2                            # model-a on both pages
+
+    # Re-run with model-a (present) + model-b (new): only model-b is filled.
+    con = main.open_case_db(db)
+    a2 = main.CloudTranscriber(client=_FakeClient(transcription="A2", fidelity=0.8), model="model-a")
+    b = main.CloudTranscriber(client=_FakeClient(transcription="B", fidelity=0.9), model="model-b")
+    stats2 = main.transcribe_case(con, pages, "t1", [a2, b])
+    rows = con.execute(
+        "SELECT page_id, model, rev, text FROM page_text ORDER BY page_id, model"
+    ).fetchall()
+    con.close()
+
+    assert stats2["pages"] == 2                            # only model-b's 2 pages
+    assert a2._client.calls == 0                           # model-a already present → no call
+    assert b._client.calls == 2                            # model-b filled both pages
+    # model-a stays at rev 0 with its original text; model-b is a fresh rev 0.
+    for pid in {r[0] for r in rows}:
+        by_model = {r[1]: r for r in rows if r[0] == pid}
+        assert by_model["model-a"][2] == 0 and by_model["model-a"][3] == "A"
+        assert by_model["model-b"][2] == 0 and by_model["model-b"][3] == "B"
 
 
 def test_is_transient_classifies_cloud_and_local_errors():
@@ -443,6 +546,66 @@ def test_escalation_does_not_re_escalate_cloud_pages(tmp_path):
     con.close()
     assert stats["candidates"] == 0 and stats["escalated"] == 0
     assert n == 1                                          # no new rev appended
+
+
+def test_default_backend_wires_cloud_plus_every_local(monkeypatch):
+    # ADR-0006 acceptance: the default (--backend all) builds the FULL set —
+    # a CloudTranscriber when ANTHROPIC_API_KEY is set PLUS a LocalTranscriber
+    # for every installed_vision_models() entry. Hermetic: stub discovery + key.
+    import lawnlord.cli as cli
+
+    monkeypatch.setattr(cli, "installed_vision_models",
+                        lambda *_a, **_k: ["minicpm-v:latest", "qwen2.5vl:7b"])
+    monkeypatch.setattr(cli, "make_client", lambda: object())  # no real API client
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+
+    ts = cli._build_transcribers("all", None, None)
+    models = sorted(t.model for t in ts)
+    # Cloud (DEFAULT_MODEL) + both local models — every available model.
+    assert models == sorted(["minicpm-v:latest", "qwen2.5vl:7b", cli.DEFAULT_MODEL])
+    assert sum(isinstance(t, cli.LocalTranscriber) for t in ts) == 2
+    assert sum(isinstance(t, cli.CloudTranscriber) for t in ts) == 1
+
+
+def test_default_backend_no_key_still_runs_every_local(monkeypatch):
+    # A no-key user still gets all local readings by default (the exhaustive
+    # intent): no cloud tier, but a LocalTranscriber per installed vision model.
+    import lawnlord.cli as cli
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(cli, "installed_vision_models",
+                        lambda *_a, **_k: ["qwen2.5vl:7b"])
+    ts = cli._build_transcribers("all", None, None)
+    assert [t.model for t in ts] == ["qwen2.5vl:7b"]
+    assert all(isinstance(t, cli.LocalTranscriber) for t in ts)
+
+
+def test_default_backend_nothing_available_skips(monkeypatch):
+    # Neither a key nor any local model → empty set (caller skips cleanly).
+    import lawnlord.cli as cli
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(cli, "installed_vision_models", lambda *_a, **_k: [])
+    assert cli._build_transcribers("all", None, None) == []
+
+
+def test_backend_cloud_narrows_to_cloud_only(monkeypatch):
+    # --backend cloud is a narrowing override: cloud tier only, no local probe.
+    import lawnlord.cli as cli
+
+    probed = {"called": False}
+
+    def _probe(*_a, **_k):
+        probed["called"] = True
+        return ["qwen2.5vl:7b"]
+
+    monkeypatch.setattr(cli, "installed_vision_models", _probe)
+    monkeypatch.setattr(cli, "make_client", lambda: object())
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    ts = cli._build_transcribers("cloud", None, None)
+    assert [t.model for t in ts] == [cli.DEFAULT_MODEL]
+    assert all(isinstance(t, cli.CloudTranscriber) for t in ts)
+    assert probed["called"] is False                      # cloud never probes Ollama
 
 
 def test_measure_compares_backends_without_writing(tmp_path):
