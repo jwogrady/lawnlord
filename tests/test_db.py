@@ -9,6 +9,9 @@ _MIRROR_TABLES = {
     "image_events", "financials", "financial_transactions",
 }
 _EXPLODED_TABLES = {"documents", "pages", "page_text"}
+# Spatial-anchor layer (ADR-0009): boxes per text span, additive on the above.
+_SPATIAL_TABLES = {"page_regions"}
+_ALL_TABLES = _MIRROR_TABLES | _EXPLODED_TABLES | _SPATIAL_TABLES
 
 
 def _table_names(con):
@@ -18,14 +21,14 @@ def _table_names(con):
 def test_apply_schema_creates_the_mirror_and_exploded_tables(tmp_path):
     con = main.open_case_db(tmp_path / "lawnlord.duckdb")
     main.apply_schema(con)
-    assert _table_names(con) == _MIRROR_TABLES | _EXPLODED_TABLES
+    assert _table_names(con) == _ALL_TABLES
 
 
 def test_apply_schema_is_idempotent(tmp_path):
     con = main.open_case_db(tmp_path / "lawnlord.duckdb")
     main.apply_schema(con)
     main.apply_schema(con)  # second run must be a no-op
-    assert _table_names(con) == _MIRROR_TABLES | _EXPLODED_TABLES
+    assert _table_names(con) == _ALL_TABLES
     # schema_meta records exactly one version row.
     assert con.execute("SELECT count(*) FROM schema_meta").fetchone()[0] == 1
     assert con.execute("SELECT version FROM schema_meta").fetchone()[0] == main.SCHEMA_VERSION

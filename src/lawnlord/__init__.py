@@ -24,6 +24,7 @@ from .export import (
     export_image,
     export_metrics,
     export_page,
+    export_regions,
 )
 from .hashing import now_iso, sha256_bytes, sha256_file
 from .ingest import ingest_case
@@ -61,6 +62,12 @@ from .reader import (
     find_intake_dir,
     load_case_model,
     validate_data,
+)
+from .regions import (
+    capture_pdf_regions,
+    extract_pdf_charboxes,
+    normalize_rect,
+    token_char_offsets,
 )
 from .transcribe import DEFAULT_MODEL as TRANSCRIBE_MODEL
 from .transcribe import (

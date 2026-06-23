@@ -15,8 +15,11 @@ On top of the mirror sits the **Exploded layer** — ``documents`` (one per imag
 and ``pages`` (one per rendered page, with its PNG pointer), populated by
 :mod:`lawnlord.explode`; and ``page_text`` — the **append-only** AI transcription
 of each page (rev 0 immutable; re-runs append a revision), populated by
-:mod:`lawnlord.transcribe`. All additive: they reference the mirror but never
-mutate it. Analysis is a later additive layer.
+:mod:`lawnlord.transcribe`. Above that sits the **spatial-anchor layer** —
+``page_regions`` (ADR-0009): a bounding box per text span, anchored to a source
+row via a generic ``(anchor_kind, anchor_id)``, populated by
+:mod:`lawnlord.regions`. All additive: they reference the mirror but never mutate
+it. Analysis is a later additive layer.
 """
 
 from __future__ import annotations
@@ -37,7 +40,12 @@ import duckdb
 # page_id|source|model|rev) so one page holds *every* transcription variation —
 # the PDF text layer plus one row per vision model — each individually
 # addressable, instead of a single (page_id, rev) lineage. Regenerable: re-import.
-SCHEMA_VERSION = 10
+# v11 (ADR-0009): `page_regions` — an additive, generic page-region primitive
+# (bounding boxes per text span, normalized 0..1 top-left) anchored to a source
+# row's stable id (`anchor_kind`/`anchor_id`: a `page_text` variation today, an
+# analysis entity later). Populated from PDF geometry for born-digital pages;
+# never fabricated. Additive: references pages/page_text, never mutates them.
+SCHEMA_VERSION = 11
 
 # One statement per table; CREATE ... IF NOT EXISTS keeps apply_schema idempotent.
 _SCHEMA_STATEMENTS = (
@@ -169,6 +177,34 @@ _SCHEMA_STATEMENTS = (
         text TEXT,
         fidelity DOUBLE,
         model TEXT,
+        created_at TEXT
+    )
+    """,
+    # Spatial-anchor layer (ADR-0009): bounding boxes per text span, anchored to a
+    # source row's stable id via (anchor_kind, anchor_id) — a `page_text` variation
+    # today, an analysis entity later — so it is a *general* page-region primitive,
+    # not transcription-specific. Coordinates are normalized 0..1 with a top-left
+    # origin (resolution-independent: they overlay the rendered PNG at any DPI).
+    # `char_start`/`char_end` index the anchor's text (the span this box covers).
+    # Additive and deterministic: ids/ordering hash structure only, never the
+    # (possibly model-supplied) coordinates. A span with no reliable geometry is
+    # simply absent — a region is never fabricated.
+    """
+    CREATE TABLE IF NOT EXISTS page_regions (
+        id TEXT PRIMARY KEY,
+        case_id TEXT NOT NULL,
+        page_id TEXT NOT NULL,
+        anchor_id TEXT NOT NULL,
+        anchor_kind TEXT NOT NULL,
+        span_index INTEGER NOT NULL,
+        char_start INTEGER,
+        char_end INTEGER,
+        x0 DOUBLE NOT NULL,
+        y0 DOUBLE NOT NULL,
+        x1 DOUBLE NOT NULL,
+        y1 DOUBLE NOT NULL,
+        origin TEXT NOT NULL,
+        confidence DOUBLE,
         created_at TEXT
     )
     """,
