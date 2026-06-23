@@ -1,15 +1,20 @@
 # ADR-0004: Embedded PDF text-layer pre-pass before any vision tier
 
-Status: Proposed
+Status: Accepted
 Date: 2026-06-22
 
 ## Context
 
 ADR-0001/0002 commit to a local-GPU vision tier (with cloud escalation) to
 transcribe page PNGs. That framing assumes every page must be recognized from
-pixels. A measurement of the working case contradicts that assumption: **20 of 22
-filed PDFs (~248 of 255 pages) are born-digital and carry a rich embedded text
-layer**; only 2 PDFs (6 scanned/image-only pages) lack one. See
+pixels. A per-page measurement of the working case contradicts that assumption:
+**149 of 255 pages are born-digital and carry a rich embedded text layer; 106 are
+scanned/image-only** (`< 100` non-whitespace chars). The image bulk is
+concentrated in two large filings — `doc-25856216` (Motion for Summary Judgment,
+121 pages, 94 image-only) and `doc-25980946` (Answer, 64 pages, 8 image-only) —
+with `doc-24775937`/`doc-24775944` adding 2 each. No PDF is *fully* image-only:
+every file's caption page is born-digital, which is why an earlier per-*file*
+count overstated the win as "20/22 PDFs / ~248 pages". See
 `docs/problem-transcription-efficiency.md` (lever 0).
 
 For a born-digital page the PDF *already contains the exact text*. Re-recognizing
@@ -41,11 +46,13 @@ vision tier (local or cloud):
 
 ## Consequences
 
-- **Easier:** for born-digital cases the first full run drops from ~255 model
-  calls to ~6 (this case), before any local/cloud decision — near-instant and
-  near-free. Output is *more* accurate on those pages (exact text, no OCR error).
-  Makes the local-vs-Opus measurement (#106) cheap because only the genuine
-  image-only pages are in play.
+- **Easier:** the first full run drops from 255 model calls to **~106** (this
+  case): 149 born-digital pages land straight from the text layer, before any
+  local/cloud decision — near-instant and near-free, and *more* accurate on those
+  pages (exact text, no OCR error). The vision tier still carries the ~106
+  image-only pages, so the local-vs-Opus measurement (#106) remains the load-
+  bearing lever for this case, not an afterthought — the pre-pass roughly halves
+  its input rather than reducing it to a handful.
 - **Harder:** a `source` column now carries `pdf_text` as well as `ai`; exports
   and the viewer should surface provenance (and may show `pdf_text` differently
   from a model transcription). Embedded text reading-order can occasionally be
@@ -60,7 +67,7 @@ vision tier (local or cloud):
 
 - **Vision-only for everything (status quo / ADR-0001 as written).** Uniform code
   path, but pays a model to re-OCR text that already exists exactly, and is less
-  accurate on the 248 born-digital pages. Rejected as the default.
+  accurate on the 149 born-digital pages. Rejected as the default.
 - **Use embedded text only as a fidelity cross-check, still OCR every page.**
   Keeps one path and gives an objective fidelity signal, but throws away the free
   ground-truth and the ~97% cost/time win. Rejected; the cross-check is a possible

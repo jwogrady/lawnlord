@@ -263,18 +263,20 @@ def _main(argv: list[str] | None = None) -> None:
         pages_dir = case_dir / "extracted" / "pages"
         con = open_case_db(case_dir / "lawnlord.duckdb")
         apply_schema(con)
-        generated_at = captured_at(find_intake_dir(case_dir))
+        intake_dir = find_intake_dir(case_dir)
+        generated_at = captured_at(intake_dir)
         stats = transcribe_case(
             con, pages_dir, generated_at, make_client(),
-            model=args.model or DEFAULT_MODEL, force=args.force,
+            model=args.model or DEFAULT_MODEL, force=args.force, intake_dir=intake_dir,
         )
         con.close()
-        table = Table(title="Transcribed (page PNG → AI text)")
+        table = Table(title="Transcribed (PDF text layer + vision fallback)")
         table.add_column("Metric")
         table.add_column("Value", justify="right")
-        table.add_row("Pages transcribed", str(stats["pages"]))
+        table.add_row("Pages from PDF text layer", str(stats["pdf_text"]))
+        table.add_row("Pages transcribed (vision)", str(stats["pages"]))
         table.add_row("Skipped (already transcribed)", str(len(stats["skipped_existing"])))
-        table.add_row("Avg fidelity", f"{stats['avg_fidelity']:.2f}")
+        table.add_row("Avg fidelity (vision)", f"{stats['avg_fidelity']:.2f}")
         console.print(table)
         if stats["skipped"]:
             console.print(f"[yellow]Skipped (no PNG):[/] {len(stats['skipped'])}")

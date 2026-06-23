@@ -130,6 +130,48 @@ def test_re_running_skips_already_transcribed_by_default(tmp_path):
     assert revs[0][1] == "FIRST"                     # untouched
 
 
+def test_born_digital_page_uses_pdf_text_layer(tmp_path, monkeypatch):
+    # Lever 0: a page with a rich embedded text layer is stored verbatim from the
+    # PDF (source='pdf_text', fidelity 1.0, model NULL) with NO model call.
+    import lawnlord.transcribe as tx
+    case_dir = _exploded_case(tmp_path, pages=1)
+    intake_dir = main.find_intake_dir(case_dir)
+    monkeypatch.setattr(tx, "extract_pdf_text", lambda _p: ["BORN-DIGITAL TEXT " * 10])
+
+    con = main.open_case_db(case_dir / "lawnlord.duckdb")
+    main.apply_schema(con)
+    client = _FakeClient()
+    stats = main.transcribe_case(con, case_dir / "extracted" / "pages", "t0",
+                                 client, intake_dir=intake_dir)
+    rows = con.execute("SELECT source, text, fidelity, model FROM page_text").fetchall()
+    con.close()
+    assert client.calls == 0                         # no vision call for born-digital
+    assert stats["pdf_text"] == 1 and stats["pages"] == 0
+    assert rows[0][0] == "pdf_text"
+    assert rows[0][2] == 1.0
+    assert rows[0][3] is None                        # model NULL
+    assert "BORN-DIGITAL" in rows[0][1]
+
+
+def test_image_only_page_falls_through_to_vision(tmp_path, monkeypatch):
+    # A page with no usable embedded text falls through to the vision tier.
+    import lawnlord.transcribe as tx
+    case_dir = _exploded_case(tmp_path, pages=1)
+    intake_dir = main.find_intake_dir(case_dir)
+    monkeypatch.setattr(tx, "extract_pdf_text", lambda _p: [""])  # no text layer
+
+    con = main.open_case_db(case_dir / "lawnlord.duckdb")
+    main.apply_schema(con)
+    client = _FakeClient(transcription="VISION OCR", fidelity=0.6)
+    stats = main.transcribe_case(con, case_dir / "extracted" / "pages", "t0",
+                                 client, intake_dir=intake_dir)
+    rows = con.execute("SELECT source, text FROM page_text").fetchall()
+    con.close()
+    assert client.calls == 1                         # fell through to vision
+    assert stats["pdf_text"] == 0 and stats["pages"] == 1
+    assert rows[0][0] == "ai" and rows[0][1] == "VISION OCR"
+
+
 def test_transcribe_page_sends_image_and_parses(tmp_path):
     case_dir = _exploded_case(tmp_path, pages=1)
     png = next((case_dir / "extracted" / "pages").rglob("*.png"))
