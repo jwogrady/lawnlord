@@ -13,6 +13,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import index from "./index.html";
+import { handleDownload, type DownloadConfig } from "./download";
 
 const CASE_DIR = process.env.CASE_DIR ?? ".";
 const REPO_ROOT = join(import.meta.dir, "..");
@@ -36,6 +37,14 @@ function resolveIntakeDir(): string {
 }
 
 const INTAKE_DIR = resolveIntakeDir();
+
+// Config for the multi-level download routes (issue #124): read-only access to
+// the case's PNG/PDF dirs + the Python exports the server already shells to.
+const DOWNLOAD_CONFIG: DownloadConfig = {
+	caseDir: CASE_DIR,
+	intakeDir: INTAKE_DIR,
+	repoRoot: REPO_ROOT,
+};
 
 // Serve a file from the intake dir under a fixed subdir, blocking path escapes.
 function serveFromIntake(sub: string, rest: string): Response {
@@ -73,6 +82,11 @@ const server = Bun.serve({
 	},
 	async fetch(req) {
 		const url = new URL(req.url);
+		// Multi-level artifact downloads (page/image/document/filing/case).
+		if (url.pathname.startsWith("/download/")) {
+			const res = await handleDownload(DOWNLOAD_CONFIG, url.pathname);
+			if (res) return res;
+		}
 		if (url.pathname.startsWith("/files/")) {
 			return serveFromIntake("files", url.pathname.slice("/files/".length));
 		}
