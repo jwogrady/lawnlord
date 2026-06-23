@@ -160,6 +160,27 @@ def test_divergence_includes_insert_and_delete(tmp_path):
     assert any(s["op"] == "delete" for s in by_model["modelB"]["divergence"])
 
 
+def test_per_variation_flagged_signal(tmp_path):
+    # `flagged` is the per-reading review signal the text viewer renders (#126):
+    # the anchor is never flagged; a reading is flagged when it drifts below the
+    # agreement threshold OR its self-assessed fidelity is below the threshold.
+    con = _con(tmp_path)
+    _image(con, "img1")
+    _page(con, "p1", "img1")
+    _text(con, "p1", "pdf_text", None, "alpha beta gamma delta", 1.0)  # anchor
+    _text(con, "p1", "ai", "clean", "alpha beta gamma delta", 0.95)  # agrees + good fidelity
+    _text(con, "p1", "ai", "lowfid", "alpha beta gamma delta", 0.5)  # agrees but low fidelity
+    _text(con, "p1", "ai", "diverged", "totally different words here", 0.95)  # low agreement
+
+    page = export.export_page(con, "p1")["page"]
+    con.close()
+    by = {t.get("model") or t["source"]: t for t in page["transcriptions"]}
+    assert by["pdf_text"]["flagged"] is False  # the anchor is never flagged
+    assert by["clean"]["flagged"] is False  # agrees + healthy fidelity
+    assert by["lowfid"]["flagged"] is True  # low fidelity alone flags
+    assert by["diverged"]["flagged"] is True  # low agreement alone flags
+
+
 # --- (d) aggregate metrics: coverage + flagged-page detection ---------------
 
 

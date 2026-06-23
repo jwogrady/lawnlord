@@ -127,9 +127,14 @@ def _anchor_index(variations: list[dict]) -> int | None:
 
 
 def _annotate_divergence(variations: list[dict]) -> list[dict]:
-    """Add ``agreement`` and ``divergence`` to each variation in place against
-    the page's canonical anchor. The anchor gets ``agreement: 1.0`` and an empty
-    ``divergence``. Returns the same list for convenience."""
+    """Add ``agreement``, ``divergence`` and ``flagged`` to each variation in
+    place against the page's canonical anchor. The anchor gets ``agreement: 1.0``,
+    an empty ``divergence`` and ``flagged: False``. ``flagged`` is the per-reading
+    review signal — ``True`` when a non-anchor reading drifts below
+    :data:`AGREEMENT_FLAG_THRESHOLD` or its self-assessed ``fidelity`` is below
+    :data:`FIDELITY_FLAG_THRESHOLD` — decided here (the same thresholds
+    :func:`_rollup` uses) so the viewer renders the flag without re-scoring.
+    Returns the same list for convenience."""
     anchor_idx = _anchor_index(variations)
     if anchor_idx is None:
         return variations
@@ -138,9 +143,14 @@ def _annotate_divergence(variations: list[dict]) -> list[dict]:
         if i == anchor_idx:
             v["agreement"] = 1.0
             v["divergence"] = []
+            v["flagged"] = False
         else:
             v["agreement"] = agreement_score(anchor_text, v["text"])
             v["divergence"] = divergence_spans(anchor_text, v["text"])
+            fid = v.get("fidelity")
+            v["flagged"] = v["agreement"] < AGREEMENT_FLAG_THRESHOLD or (
+                fid is not None and fid < FIDELITY_FLAG_THRESHOLD
+            )
     return variations
 
 
@@ -427,10 +437,10 @@ def export_exploded(
     ``(page_id, source, model)``**, ordered ground-truth first (``pdf_text``)
     then ``ai`` by model name; each entry carries ``source``, ``model``, ``rev``,
     ``createdAt``, ``fidelity``, ``text``, plus an ``agreement`` (0.0–1.0
-    similarity to the page's canonical anchor) and a ``divergence`` (the changed
-    token spans against that anchor) — see :func:`_annotate_divergence`. An
-    untranscribed page carries an empty list. The lens always shows the page
-    image regardless.
+    similarity to the page's canonical anchor), a ``divergence`` (the changed
+    token spans against that anchor) and a ``flagged`` review signal — see
+    :func:`_annotate_divergence`. An untranscribed page carries an empty list.
+    The lens always shows the page image regardless.
     """
     if page_id is not None:
         return export_page(con, page_id)
