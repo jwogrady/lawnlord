@@ -442,3 +442,66 @@ iframe.snap {
 	color: var(--muted);
 	border-style: dashed;
 }
+
+/* On-image highlight overlay (#129): boxes positioned over the page image by the
+   regions' normalized coords, click-linked to the record text bidirectionally. */
+.cmp-imgwrap {
+	position: relative;
+	border: 1px solid var(--line);
+	background: #fff;
+	line-height: 0;
+}
+
+.cmp-imgwrap img {
+	width: 100%;
+	border: 0;
+}
+
+.region-layer {
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+}
+
+.region-box {
+	position: absolute;
+	pointer-events: auto;
+	cursor: pointer;
+	border: 1px solid transparent;
+	border-radius: 2px;
+}
+
+.region-box:hover {
+	background: rgba(207, 161, 63, 0.25);
+	border-color: var(--gold);
+}
+
+/* A record span at least one AI reading replaced or dropped. */
+.region-box.diverged {
+	background: rgba(207, 161, 63, 0.15);
+	border-color: var(--gold-deep);
+}
+
+.region-box.active {
+	background: rgba(207, 161, 63, 0.5);
+	border-color: var(--gold);
+}
+
+/* Clickable record tokens, linked to their image regions. */
+.tok {
+	cursor: pointer;
+	border-radius: 2px;
+}
+
+.tok:hover {
+	background: rgba(207, 161, 63, 0.25);
+}
+
+.tok.diverged {
+	text-decoration: underline dotted var(--gold-deep);
+}
+
+.tok.active {
+	background: var(--gold);
+	color: var(--ink);
+}
