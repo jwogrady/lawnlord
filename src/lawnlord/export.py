@@ -21,7 +21,127 @@ event (overlap with other filings allowed). This module never writes.
 
 from __future__ import annotations
 
+import difflib
+
 import duckdb
+
+# --- Divergence & agreement (ADR-0008) --------------------------------------
+#
+# Confidence needs the spread between readings *shown* (the text viewer) and
+# *quantified* (the gauges). Define it once, here, so every consumer agrees.
+#
+# A page's transcriptions are compared against a single **canonical anchor**:
+#   - the ``pdf_text`` reading when the page has one (the court's own text
+#     layer is ground truth); otherwise
+#   - the cross-model **consensus** of the ``ai`` readings, defined as the
+#     *medoid* — the variation whose mean pairwise similarity to the others is
+#     highest (ties broken by model name ascending). A lone ``ai`` reading is
+#     trivially its own anchor.
+#
+# Each variation then carries:
+#   - ``agreement``: a normalized 0.0–1.0 similarity to the anchor, the
+#     ``difflib.SequenceMatcher`` ratio over whitespace-split *token* lists,
+#     rounded to AGREEMENT_PRECISION. The anchor scores 1.0.
+#   - ``divergence``: a JSON-serializable list of the changed spans
+#     (``replace``/``delete``/``insert`` opcodes) between the anchor's tokens
+#     and the variation's tokens, each carrying the op kind, the anchor-side and
+#     variation-side token index ranges, and the literal token substrings — so a
+#     viewer can highlight without re-diffing. The anchor's divergence is empty.
+#
+# Everything is computed from text alone: deterministic given fixed input.
+
+AGREEMENT_PRECISION = 4
+# A page is flagged for review (a worklist entry) when any reading drifts too
+# far from the anchor, any reading's model self-assessed fidelity is too low, or
+# an expected variation is missing for that page.
+AGREEMENT_FLAG_THRESHOLD = 0.8
+FIDELITY_FLAG_THRESHOLD = 0.8
+
+
+def _tokens(text: str | None) -> list[str]:
+    """Whitespace-split tokens — the unit of comparison for agreement and
+    divergence. ``None`` text (an absent reading) is the empty token list."""
+    return (text or "").split()
+
+
+def agreement_score(anchor_text: str | None, text: str | None) -> float:
+    """Normalized 0.0–1.0 similarity of ``text`` to ``anchor_text`` — the
+    ``SequenceMatcher`` ratio over whitespace-split tokens, rounded. Two empty
+    readings agree perfectly (1.0)."""
+    a, b = _tokens(anchor_text), _tokens(text)
+    if not a and not b:
+        return 1.0
+    ratio = difflib.SequenceMatcher(None, a, b, autojunk=False).ratio()
+    return round(ratio, AGREEMENT_PRECISION)
+
+
+def divergence_spans(anchor_text: str | None, text: str | None) -> list[dict]:
+    """The changed token spans between the anchor and a variation, as a
+    JSON-serializable list. Each span carries the opcode kind plus the
+    anchor-side (``a``) and variation-side (``b``) token index ranges and the
+    literal token substrings, so a later viewer can highlight without re-diffing.
+    Equal runs are omitted; identical text yields ``[]``."""
+    a, b = _tokens(anchor_text), _tokens(text)
+    spans: list[dict] = []
+    for op, i1, i2, j1, j2 in difflib.SequenceMatcher(
+        None, a, b, autojunk=False
+    ).get_opcodes():
+        if op == "equal":
+            continue
+        spans.append(
+            {
+                "op": op,
+                "anchor": {"start": i1, "end": i2, "tokens": a[i1:i2]},
+                "variation": {"start": j1, "end": j2, "tokens": b[j1:j2]},
+            }
+        )
+    return spans
+
+
+def _consensus_index(texts: list[str | None]) -> int:
+    """Index of the medoid of ``texts`` — the reading whose mean pairwise
+    agreement to the others is highest. Callers pass an already model-name-sorted
+    list so ``max`` keeps the first (lowest model name) on a tie. A single
+    element is trivially its own consensus."""
+    if len(texts) == 1:
+        return 0
+    best_idx, best_mean = 0, -1.0
+    for i, ti in enumerate(texts):
+        others = [agreement_score(ti, tj) for j, tj in enumerate(texts) if j != i]
+        mean = sum(others) / len(others)
+        if mean > best_mean:
+            best_idx, best_mean = i, mean
+    return best_idx
+
+
+def _anchor_index(variations: list[dict]) -> int | None:
+    """Index of the canonical anchor within ``variations`` (already sorted
+    ground-truth-first then ``ai`` by model). The ``pdf_text`` reading if present,
+    else the consensus medoid of the ``ai`` readings. ``None`` for an empty list."""
+    if not variations:
+        return None
+    for i, v in enumerate(variations):
+        if v["source"] == "pdf_text":
+            return i
+    return _consensus_index([v["text"] for v in variations])
+
+
+def _annotate_divergence(variations: list[dict]) -> list[dict]:
+    """Add ``agreement`` and ``divergence`` to each variation in place against
+    the page's canonical anchor. The anchor gets ``agreement: 1.0`` and an empty
+    ``divergence``. Returns the same list for convenience."""
+    anchor_idx = _anchor_index(variations)
+    if anchor_idx is None:
+        return variations
+    anchor_text = variations[anchor_idx]["text"]
+    for i, v in enumerate(variations):
+        if i == anchor_idx:
+            v["agreement"] = 1.0
+            v["divergence"] = []
+        else:
+            v["agreement"] = agreement_score(anchor_text, v["text"])
+            v["divergence"] = divergence_spans(anchor_text, v["text"])
+    return variations
 
 
 def _one(con: duckdb.DuckDBPyConnection, sql: str, params: list | None = None) -> dict:
@@ -128,6 +248,7 @@ def _variations_by_page(
         by_page.setdefault(r["page_id"], []).append(entry)
     for entries in by_page.values():
         entries.sort(key=lambda t: (t["source"] != "pdf_text", t["source"], t["model"] or ""))
+        _annotate_divergence(entries)
     return by_page
 
 
@@ -278,8 +399,11 @@ def export_exploded(
     Each page's ``transcriptions`` is the **latest rev per
     ``(page_id, source, model)``**, ordered ground-truth first (``pdf_text``)
     then ``ai`` by model name; each entry carries ``source``, ``model``, ``rev``,
-    ``createdAt``, ``fidelity``, and ``text``. An untranscribed page carries an
-    empty list. The lens always shows the page image regardless.
+    ``createdAt``, ``fidelity``, ``text``, plus an ``agreement`` (0.0–1.0
+    similarity to the page's canonical anchor) and a ``divergence`` (the changed
+    token spans against that anchor) — see :func:`_annotate_divergence`. An
+    untranscribed page carries an empty list. The lens always shows the page
+    image regardless.
     """
     if page_id is not None:
         return export_page(con, page_id)
@@ -290,3 +414,131 @@ def export_exploded(
     if filing_id is not None:
         return export_filing(con, filing_id)
     return {"images": _images_for(con)}
+
+
+# --- Aggregate metrics (ADR-0008) -------------------------------------------
+
+
+def _page_rows_for_metrics(
+    con: duckdb.DuckDBPyConnection, image_id: str | None
+) -> list[dict]:
+    """The pages in scope (whole case, or one image), each with its annotated
+    ``transcriptions`` list — the same shape the exploded lens emits, reused so
+    metrics and the viewer can never disagree on agreement/divergence."""
+    if image_id is None:
+        pages = _pages(con)
+    else:
+        pages = _pages(con, "image_id = ?", [image_id])
+    return pages
+
+
+def _rollup(pages: list[dict]) -> dict:
+    """Aggregate one scope (case or a single image) from its annotated pages.
+
+    - **coverage**: fraction of expected ``(page × variation)`` cells present,
+      where the expected variation set is the union of ``(source, model)`` keys
+      seen across the scope. A page missing a model others have lowers coverage.
+      Raw ``present``/``expected`` counts are surfaced alongside the fraction.
+    - **meanAgreement**: mean ``agreement`` over the *non-anchor* variations
+      (the anchor's trivial 1.0 is excluded so the number reflects real spread).
+    - **fidelityByModel**: per model, ``count`` and ``min``/``mean``/``max`` of
+      the recorded fidelities (fidelities of ``None`` — e.g. ``pdf_text`` — are
+      ignored).
+    - **flaggedPages**: page ids flagged for review — any reading below
+      :data:`AGREEMENT_FLAG_THRESHOLD`, any fidelity below
+      :data:`FIDELITY_FLAG_THRESHOLD`, or an expected variation missing.
+    """
+    # Expected variation set = union of (source, model) keys across the scope.
+    expected_keys: set[tuple[str, str | None]] = set()
+    for p in pages:
+        for v in p["transcriptions"]:
+            expected_keys.add((v["source"], v["model"]))
+
+    present = sum(len(p["transcriptions"]) for p in pages)
+    expected = len(pages) * len(expected_keys)
+    coverage = round(present / expected, AGREEMENT_PRECISION) if expected else 1.0
+
+    agreements: list[float] = []
+    fidelities_by_model: dict[str, list[float]] = {}
+    flagged: list[str] = []
+    for p in pages:
+        keys = {(v["source"], v["model"]) for v in p["transcriptions"]}
+        flag = bool(expected_keys - keys)  # missing an expected variation
+        for v in p["transcriptions"]:
+            label = v["model"] or v["source"]
+            fid = v.get("fidelity")
+            if fid is not None:
+                fidelities_by_model.setdefault(label, []).append(fid)
+                if fid < FIDELITY_FLAG_THRESHOLD:
+                    flag = True
+        # Mean agreement is over the *non-anchor* readings: every variation
+        # except the page's anchor (the same anchor _annotate_divergence used).
+        anchor_idx = _anchor_index(p["transcriptions"])
+        for i, v in enumerate(p["transcriptions"]):
+            if i == anchor_idx:
+                continue
+            agreements.append(v["agreement"])
+            if v["agreement"] < AGREEMENT_FLAG_THRESHOLD:
+                flag = True
+        if flag:
+            flagged.append(p["id"])
+
+    mean_agreement = (
+        round(sum(agreements) / len(agreements), AGREEMENT_PRECISION)
+        if agreements
+        else 1.0
+    )
+    fidelity_distribution = {
+        model: {
+            "count": len(vals),
+            "min": round(min(vals), AGREEMENT_PRECISION),
+            "mean": round(sum(vals) / len(vals), AGREEMENT_PRECISION),
+            "max": round(max(vals), AGREEMENT_PRECISION),
+        }
+        for model, vals in sorted(fidelities_by_model.items())
+    }
+    return {
+        "pages": len(pages),
+        "coverage": {
+            "fraction": coverage,
+            "present": present,
+            "expected": expected,
+            "expectedVariations": [
+                {"source": s, "model": m}
+                for s, m in sorted(expected_keys, key=lambda k: (k[0], k[1] or ""))
+            ],
+        },
+        "meanAgreement": mean_agreement,
+        "fidelityByModel": fidelity_distribution,
+        "flaggedPageCount": len(flagged),
+        "flaggedPages": flagged,
+    }
+
+
+def export_metrics(
+    con: duckdb.DuckDBPyConnection, *, image_id: str | None = None
+) -> dict:
+    """Aggregate divergence/confidence metrics rolled up at the **case** and
+    **image** levels (ADR-0008). Read-only and deterministic given fixed text.
+
+    Returns ``{"case": <rollup>, "images": [{"imageId", ...<rollup>}, ...]}``.
+    Each rollup is :func:`_rollup` over the annotated pages in that scope:
+    coverage, mean (non-anchor) agreement, a per-model fidelity distribution, and
+    the flagged-page worklist. With ``image_id`` set, the case rollup is scoped to
+    that image and ``images`` holds just that one image.
+    """
+    if image_id is not None:
+        image_ids = [image_id]
+    else:
+        image_ids = [
+            r["id"] for r in _rows(con, "SELECT id FROM images ORDER BY filing_date, title")
+        ]
+
+    per_image = []
+    all_pages: list[dict] = []
+    for iid in image_ids:
+        pages = _page_rows_for_metrics(con, iid)
+        all_pages.extend(pages)
+        per_image.append({"imageId": iid, **_rollup(pages)})
+
+    return {"case": _rollup(all_pages), "images": per_image}

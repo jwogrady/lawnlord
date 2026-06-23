@@ -22,6 +22,7 @@ from .export import (
     export_exploded,
     export_filing,
     export_image,
+    export_metrics,
     export_page,
 )
 from .hashing import now_iso, sha256_bytes, sha256_file
