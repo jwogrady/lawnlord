@@ -8,6 +8,7 @@ import json
 from pypdf import PdfWriter
 
 import lawnlord as main
+from lawnlord.transcribe import _row_id
 
 _SCHEMA = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -113,14 +114,14 @@ def test_export_exploded_shape(tmp_path):
     # viewer can distinguish ground-truth text from a model's reading.
     pids = [r[0] for r in con.execute("SELECT id FROM pages ORDER BY page_number").fetchall()]
     con.execute(
-        "INSERT INTO page_text (case_id, page_id, rev, source, text, fidelity, model, created_at) "
-        "SELECT case_id, id, 0, 'ai', 'HELLO', 0.9, 'm', 't' FROM pages WHERE id = ?",
-        [pids[0]],
+        "INSERT INTO page_text (id, case_id, page_id, rev, source, text, fidelity, model, created_at) "
+        "SELECT ?, case_id, id, 0, 'ai', 'HELLO', 0.9, 'm', 't' FROM pages WHERE id = ?",
+        [_row_id(pids[0], "ai", "m", 0), pids[0]],
     )
     con.execute(
-        "INSERT INTO page_text (case_id, page_id, rev, source, text, fidelity, model, created_at) "
-        "SELECT case_id, id, 0, 'pdf_text', 'WORLD', 1.0, NULL, 't' FROM pages WHERE id = ?",
-        [pids[1]],
+        "INSERT INTO page_text (id, case_id, page_id, rev, source, text, fidelity, model, created_at) "
+        "SELECT ?, case_id, id, 0, 'pdf_text', 'WORLD', 1.0, NULL, 't' FROM pages WHERE id = ?",
+        [_row_id(pids[1], "pdf_text", None, 0), pids[1]],
     )
     try:
         payload = main.export_exploded(con)

@@ -351,11 +351,54 @@ def test_is_transient_classifies_cloud_and_local_errors():
 
 
 def _seed_page_text(con, case_id, page_id, rev, source, fidelity, model, text="L"):
+    import lawnlord.transcribe as tx
+
     con.execute(
-        "INSERT INTO page_text (case_id, page_id, rev, source, text, fidelity, "
-        "model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        [case_id, page_id, rev, source, text, fidelity, model, "t0"],
+        "INSERT INTO page_text (id, case_id, page_id, rev, source, text, fidelity, "
+        "model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [tx._row_id(page_id, source, model, rev), case_id, page_id, rev, source,
+         text, fidelity, model, "t0"],
     )
+
+
+def test_page_holds_every_transcription_variation(tmp_path):
+    # ADR-0005 (v10): one page holds every variation at once — the PDF text layer
+    # plus a row per vision model — each addressable by its surrogate id. They
+    # coexist; the surrogate key never collapses them into one lineage.
+    import duckdb
+
+    import lawnlord.transcribe as tx
+
+    case_dir = _exploded_case(tmp_path, pages=1)
+    con = main.open_case_db(case_dir / "lawnlord.duckdb")
+    main.apply_schema(con)
+    page_id = con.execute("SELECT id FROM pages").fetchone()[0]
+    case_id = con.execute("SELECT id FROM cases").fetchone()[0]
+
+    _seed_page_text(con, case_id, page_id, 0, "pdf_text", 1.0, None)   # text layer
+    _seed_page_text(con, case_id, page_id, 0, "ai", 0.80, "local")     # model A
+    _seed_page_text(con, case_id, page_id, 0, "ai", 0.95, "cloud")     # model B
+
+    # All three variations of the one page coexist.
+    n = con.execute(
+        "SELECT count(*) FROM page_text WHERE page_id = ?", [page_id]
+    ).fetchone()[0]
+    assert n == 3
+    sources = {r[0] for r in con.execute(
+        "SELECT model FROM page_text WHERE page_id = ?", [page_id]
+    ).fetchall()}
+    assert sources == {None, "local", "cloud"}
+
+    # Append-only per variation: re-inserting an identical (page_id, source,
+    # model, rev) yields the same id and conflicts (rev 0 of a variation is
+    # immutable).
+    try:
+        _seed_page_text(con, case_id, page_id, 0, "ai", 0.80, "local")
+        raised = False
+    except duckdb.ConstraintException:
+        raised = True
+    con.close()
+    assert raised
 
 
 def test_escalate_reruns_only_low_fidelity_model_pages(tmp_path):
