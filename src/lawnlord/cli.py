@@ -322,7 +322,7 @@ def _main(argv: list[str] | None = None) -> None:
         table = Table(title="Transcribed (PDF text layer + vision fallback)")
         table.add_column("Metric")
         table.add_column("Value", justify="right")
-        table.add_row("Vision backend", transcriber.model)
+        table.add_row("Vision model", transcriber.model)
         table.add_row("Pages from PDF text layer", str(stats["pdf_text"]))
         table.add_row("Pages transcribed (vision)", str(stats["pages"]))
         table.add_row("Skipped (already transcribed)", str(len(stats["skipped_existing"])))

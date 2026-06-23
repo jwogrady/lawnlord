@@ -321,10 +321,30 @@ def test_ollama_available_detects_pulled_model(monkeypatch):
     monkeypatch.setattr(urllib.request, "urlopen", tags)
     assert tx.ollama_available("qwen2.5vl:7b") is True
     assert tx.ollama_available("minicpm-v") is True          # bare name matches :latest
+    assert tx.ollama_available("qwen2.5vl") is True          # bare name matches the :7b tag
     assert tx.ollama_available("llava:13b") is False
+    # An explicit tag that isn't pulled must NOT pass just because the family is —
+    # else the CLI would pick a model Ollama can't serve and never fall back.
+    assert tx.ollama_available("qwen2.5vl:3b") is False
 
     def boom(_req, timeout=None):
         raise OSError("connection refused")
 
     monkeypatch.setattr(urllib.request, "urlopen", boom)
     assert tx.ollama_available("qwen2.5vl:7b") is False      # server down → not available
+
+
+def test_is_transient_classifies_cloud_and_local_errors():
+    import socket
+    import urllib.error
+    import lawnlord.transcribe as tx
+
+    overloaded = RuntimeError("529"); overloaded.status_code = 529
+    assert tx._is_transient(overloaded) is True              # cloud overloaded
+    http503 = urllib.error.HTTPError("u", 503, "busy", {}, None)
+    assert tx._is_transient(http503) is True                 # Ollama warming (.code)
+    http404 = urllib.error.HTTPError("u", 404, "no model", {}, None)
+    assert tx._is_transient(http404) is False                # model-not-found, not transient
+    assert tx._is_transient(urllib.error.URLError("refused")) is True  # connection refused
+    assert tx._is_transient(socket.timeout("read timed out")) is True
+    assert tx._is_transient(ValueError("bad json")) is False  # non-transient → no retry

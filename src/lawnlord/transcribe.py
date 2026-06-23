@@ -186,10 +186,14 @@ def ollama_available(model: str = DEFAULT_LOCAL_MODEL, host: str | None = None) 
     except Exception:
         return False
     names = {m.get("name", "") for m in tags.get("models", [])}
-    # Ollama tags carry an explicit ``:tag``; match a bare name against ``name:latest`` too.
-    return model in names or f"{model}:latest" in names or any(
-        n.split(":", 1)[0] == model.split(":", 1)[0] for n in names
-    )
+    if model in names or f"{model}:latest" in names:
+        return True
+    # A bare name (no explicit ``:tag``) matches any pulled tag of that repo; an
+    # explicit tag must match exactly — else we'd green-light a tag that isn't
+    # pulled and the call would fail at runtime instead of falling back to cloud.
+    if ":" not in model:
+        return any(n.split(":", 1)[0] == model for n in names)
+    return False
 
 
 def extract_pdf_text(pdf_path: str | Path) -> list[str]:
@@ -215,12 +219,26 @@ def extract_pdf_text(pdf_path: str | Path) -> list[str]:
 
 def _is_transient(exc: Exception) -> bool:
     """A vision-call error worth retrying: an HTTP 429/5xx (rate limit /
-    overloaded / transient server) or a connection/timeout error."""
-    if getattr(exc, "status_code", None) in _TRANSIENT_STATUS:
+    overloaded / transient server) or a connection/timeout error — covering both
+    the cloud SDK (Anthropic) and the local backend (Ollama over urllib)."""
+    import socket
+    import urllib.error
+
+    # Anthropic exposes the status as ``.status_code``; urllib's HTTPError as ``.code``.
+    status = getattr(exc, "status_code", None)
+    if status is None:
+        status = getattr(exc, "code", None)
+    if status in _TRANSIENT_STATUS:
         return True
+    if isinstance(exc, urllib.error.HTTPError):
+        return False  # a definite non-transient HTTP status (404 model-not-found, 400, …)
+
     import anthropic
 
-    return isinstance(exc, (anthropic.APIConnectionError, anthropic.APITimeoutError))
+    return isinstance(exc, (
+        anthropic.APIConnectionError, anthropic.APITimeoutError,
+        urllib.error.URLError, socket.timeout,  # connection refused / read timeout
+    ))
 
 
 def _transcribe_with_retry(
