@@ -104,16 +104,23 @@ def test_explode_surfaces_page_count_mismatch(tmp_path):
 
 
 def test_export_exploded_shape(tmp_path):
-    case_dir = _build(tmp_path, page_count="2", pdf_pages=2)
+    case_dir = _build(tmp_path, page_count="3", pdf_pages=3)
     main.main(["explode", "--case-dir", str(case_dir)])
     con = main.open_case_db(case_dir / "lawnlord.duckdb")
     main.apply_schema(con)
-    # Transcribe page 1 only, to verify text surfaces and untranscribed pages are null.
-    pid = con.execute("SELECT id FROM pages ORDER BY page_number LIMIT 1").fetchone()[0]
+    # Page 1: an AI transcription; page 2: a pdf_text (text-layer) transcription;
+    # page 3: untranscribed. The export must surface each page's provenance so the
+    # viewer can distinguish ground-truth text from a model's reading.
+    pids = [r[0] for r in con.execute("SELECT id FROM pages ORDER BY page_number").fetchall()]
     con.execute(
         "INSERT INTO page_text (case_id, page_id, rev, source, text, fidelity, model, created_at) "
         "SELECT case_id, id, 0, 'ai', 'HELLO', 0.9, 'm', 't' FROM pages WHERE id = ?",
-        [pid],
+        [pids[0]],
+    )
+    con.execute(
+        "INSERT INTO page_text (case_id, page_id, rev, source, text, fidelity, model, created_at) "
+        "SELECT case_id, id, 0, 'pdf_text', 'WORLD', 1.0, NULL, 't' FROM pages WHERE id = ?",
+        [pids[1]],
     )
     try:
         payload = main.export_exploded(con)
@@ -123,9 +130,15 @@ def test_export_exploded_shape(tmp_path):
     assert len(payload["images"]) == 1
     doc = payload["images"][0]["documents"][0]
     pages = doc["pages"]
-    assert [p["pageNumber"] for p in pages] == [1, 2]
-    assert pages[0]["text"] == "HELLO" and pages[0]["fidelity"] == 0.9
-    assert pages[1]["text"] is None  # not transcribed → still listed, no text
+    assert [p["pageNumber"] for p in pages] == [1, 2, 3]
+    # AI page: provenance is source/model/fidelity.
+    assert pages[0]["text"] == "HELLO"
+    assert pages[0]["source"] == "ai" and pages[0]["model"] == "m" and pages[0]["fidelity"] == 0.9
+    # pdf_text page: exact text from the file — no model, fidelity 1.0.
+    assert pages[1]["text"] == "WORLD"
+    assert pages[1]["source"] == "pdf_text" and pages[1]["model"] is None and pages[1]["fidelity"] == 1.0
+    # Untranscribed page: still listed, no text and no provenance.
+    assert pages[2]["text"] is None and pages[2]["source"] is None
     assert pages[0]["png"].endswith("p001.png")
 
 
