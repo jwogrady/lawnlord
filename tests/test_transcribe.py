@@ -385,6 +385,23 @@ def test_escalate_reruns_only_low_fidelity_model_pages(tmp_path):
     assert by_page[pid[2]][1][2] == "ai" and by_page[pid[2]][1][3] == "CLOUD"
 
 
+def test_escalation_does_not_re_escalate_cloud_pages(tmp_path):
+    # A page whose latest rev the cloud model already produced is NOT re-escalated
+    # even if still below T — no unbounded re-billing on genuinely hard pages.
+    case_dir = _exploded_case(tmp_path, pages=1)
+    con = main.open_case_db(case_dir / "lawnlord.duckdb")
+    main.apply_schema(con)
+    pid = con.execute("SELECT id FROM pages ORDER BY id").fetchone()[0]
+    case_id = con.execute("SELECT id FROM cases").fetchone()[0]
+    _seed_page_text(con, case_id, pid, 0, "ai", 0.50, main.TRANSCRIBE_MODEL)  # already cloud
+    cloud = _cloud(_FakeClient(transcription="CLOUD2", fidelity=0.6))         # cloud model = TRANSCRIBE_MODEL
+    stats = main.escalate_case(con, case_dir / "extracted" / "pages", "t1", cloud, threshold=0.9)
+    n = con.execute("SELECT count(*) FROM page_text").fetchone()[0]
+    con.close()
+    assert stats["candidates"] == 0 and stats["escalated"] == 0
+    assert n == 1                                          # no new rev appended
+
+
 def test_measure_compares_backends_without_writing(tmp_path):
     case_dir = _exploded_case(tmp_path, pages=2)           # no intake_dir → sample all
     con = main.open_case_db(case_dir / "lawnlord.duckdb")

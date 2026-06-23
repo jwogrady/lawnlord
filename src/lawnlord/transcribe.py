@@ -414,7 +414,9 @@ def escalate_case(
     :func:`transcribe_case`.
     """
     pages_dir = Path(pages_dir)
-    # Latest rev per page; keep only model pages (not pdf_text) below threshold.
+    # Latest rev per page; keep only model pages (not pdf_text) below threshold
+    # that the cloud tier hasn't already produced — so a genuinely hard page the
+    # cloud also reads below T isn't re-escalated (and re-billed) on every run.
     rows = con.execute(
         "SELECT pt.case_id, pt.page_id, pt.rev, p.page_image_path "
         "FROM page_text pt "
@@ -422,8 +424,9 @@ def escalate_case(
         "JOIN (SELECT page_id, max(rev) AS mrev FROM page_text GROUP BY page_id) m "
         "  ON m.page_id = pt.page_id AND m.mrev = pt.rev "
         "WHERE pt.source = 'ai' AND pt.fidelity < ? "
+        "  AND (pt.model IS NULL OR pt.model != ?) "
         "ORDER BY pt.page_id",
-        [threshold],
+        [threshold, cloud_transcriber.model],
     ).fetchall()
 
     targets = []
