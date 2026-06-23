@@ -12,7 +12,14 @@ closed.
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+
+- **Transcription provenance in the Exploded lens** (#108). `export-exploded` now carries each
+  page's transcription `source` (`pdf_text` = exact text from the PDF's own layer, `ai` = a vision
+  model's reading), `model`, and `fidelity` alongside the text — read-only, latest revision per
+  page. The viewer renders a badge beside each page distinguishing extracted ground truth (**PDF
+  text layer**) from an AI reading (**AI · model · fidelity**), so a reader of legal records isn't
+  shown both flattened as one.
 
 ## [0.4.0] - 2026-06-22 — alpha pivot: the zip is the intake standard
 

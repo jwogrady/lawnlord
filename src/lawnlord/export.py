@@ -80,20 +80,27 @@ def export_actual(con: duckdb.DuckDBPyConnection) -> dict:
 
 def export_exploded(con: duckdb.DuckDBPyConnection) -> dict:
     """Build the Exploded-lens payload: each image → its documents → pages, with
-    the latest transcription (and fidelity) beside each page. Read-only.
+    the latest transcription beside each page. Read-only.
 
-    Pages whose transcription hasn't been run carry ``text: null`` — the lens
-    still shows the page image. The latest revision per page wins.
+    Each page carries its transcription ``source`` (``'pdf_text'`` = exact text
+    from the PDF's own layer, ``'ai'`` = a vision model's reading), ``model``, and
+    ``fidelity`` — so a reader can tell extracted ground truth from a model's
+    reading of pixels. Pages whose transcription hasn't been run carry
+    ``text: null`` (the lens still shows the page image). The latest revision per
+    page wins.
     """
     # Latest transcription per page (max rev), if any.
     text_by_page: dict[str, dict] = {}
     for r in _rows(
         con,
-        "SELECT pt.page_id, pt.text, pt.fidelity FROM page_text pt "
+        "SELECT pt.page_id, pt.text, pt.source, pt.model, pt.fidelity FROM page_text pt "
         "JOIN (SELECT page_id, max(rev) AS rev FROM page_text GROUP BY page_id) m "
         "ON m.page_id = pt.page_id AND m.rev = pt.rev",
     ):
-        text_by_page[r["page_id"]] = {"text": r["text"], "fidelity": r["fidelity"]}
+        text_by_page[r["page_id"]] = {
+            "text": r["text"], "source": r["source"],
+            "model": r["model"], "fidelity": r["fidelity"],
+        }
 
     pages_by_doc: dict[str, list[dict]] = {}
     for p in _rows(
@@ -103,6 +110,8 @@ def export_exploded(con: duckdb.DuckDBPyConnection) -> dict:
     ):
         t = text_by_page.get(p.pop("id"), {})
         p["text"] = t.get("text")
+        p["source"] = t.get("source")
+        p["model"] = t.get("model")
         p["fidelity"] = t.get("fidelity")
         pages_by_doc.setdefault(p.pop("document_id"), []).append(p)
 
