@@ -19,6 +19,7 @@ import random
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from typing import Protocol
 
 import duckdb
 import pypdfium2 as pdfium
@@ -109,6 +110,92 @@ def transcribe_page(png_path: str | Path, client, model: str = DEFAULT_MODEL) ->
     }
 
 
+# Local vision tier (ADR-0002): a vision model served by Ollama on the GPU.
+# No per-page cost, no rate limit, no data leaving the machine.
+DEFAULT_LOCAL_MODEL = "qwen2.5vl:7b"
+DEFAULT_OLLAMA_HOST = "http://localhost:11434"
+
+
+class Transcriber(Protocol):
+    """A vision backend: turn a page PNG into ``{text, fidelity, model}``.
+
+    Generalizes the injectable seam — ``transcribe_case`` calls ``.transcribe``
+    and is agnostic to whether the text came from the cloud or a local model."""
+
+    model: str
+
+    def transcribe(self, png_path: str | Path) -> dict: ...
+
+
+class CloudTranscriber:
+    """Vision tier backed by Claude (the Anthropic API). Wraps the injectable
+    ``client`` so tests mock it; defaults to a real client from the env key."""
+
+    def __init__(self, client=None, model: str = DEFAULT_MODEL):
+        self._client = client if client is not None else make_client()
+        self.model = model
+
+    def transcribe(self, png_path: str | Path) -> dict:
+        return transcribe_page(png_path, self._client, model=self.model)
+
+
+class LocalTranscriber:
+    """Vision tier backed by a local Ollama vision model — free, offline, and
+    the page never leaves the machine. Talks to Ollama's HTTP API via the stdlib
+    (no new dependency); a failure here propagates so the caller can record it."""
+
+    def __init__(self, model: str = DEFAULT_LOCAL_MODEL, host: str | None = None):
+        self.model = model
+        self._host = (host or DEFAULT_OLLAMA_HOST).rstrip("/")
+
+    def transcribe(self, png_path: str | Path) -> dict:
+        import urllib.request
+
+        payload = json.dumps({
+            "model": self.model,
+            "messages": [
+                {"role": "user", "content": _PROMPT, "images": [_b64_png(png_path)]}
+            ],
+            "stream": False,
+            "format": _OUTPUT_SCHEMA,
+            "options": {"temperature": 0},
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            f"{self._host}/api/chat", data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=600) as resp:
+            body = json.loads(resp.read())
+        data = json.loads(body["message"]["content"])
+        return {
+            "text": data.get("transcription", ""),
+            "fidelity": float(data.get("fidelity", 0.0)),
+            "model": self.model,
+        }
+
+
+def ollama_available(model: str = DEFAULT_LOCAL_MODEL, host: str | None = None) -> bool:
+    """True if the Ollama server is reachable and ``model`` is pulled — the gate
+    the CLI uses to decide local vs the cloud fallback."""
+    import urllib.request
+
+    host = (host or DEFAULT_OLLAMA_HOST).rstrip("/")
+    try:
+        with urllib.request.urlopen(f"{host}/api/tags", timeout=3) as resp:
+            tags = json.loads(resp.read())
+    except Exception:
+        return False
+    names = {m.get("name", "") for m in tags.get("models", [])}
+    if model in names or f"{model}:latest" in names:
+        return True
+    # A bare name (no explicit ``:tag``) matches any pulled tag of that repo; an
+    # explicit tag must match exactly — else we'd green-light a tag that isn't
+    # pulled and the call would fail at runtime instead of falling back to cloud.
+    if ":" not in model:
+        return any(n.split(":", 1)[0] == model for n in names)
+    return False
+
+
 def extract_pdf_text(pdf_path: str | Path) -> list[str]:
     """Embedded text of each page of ``pdf_path`` (list index = 0-based page
     index), read via pypdfium2 — free, deterministic, and the page's *exact* text
@@ -132,23 +219,38 @@ def extract_pdf_text(pdf_path: str | Path) -> list[str]:
 
 def _is_transient(exc: Exception) -> bool:
     """A vision-call error worth retrying: an HTTP 429/5xx (rate limit /
-    overloaded / transient server) or a connection/timeout error."""
-    if getattr(exc, "status_code", None) in _TRANSIENT_STATUS:
+    overloaded / transient server) or a connection/timeout error — covering both
+    the cloud SDK (Anthropic) and the local backend (Ollama over urllib)."""
+    import socket
+    import urllib.error
+
+    # Anthropic exposes the status as ``.status_code``; urllib's HTTPError as ``.code``.
+    status = getattr(exc, "status_code", None)
+    if status is None:
+        status = getattr(exc, "code", None)
+    if status in _TRANSIENT_STATUS:
         return True
+    if isinstance(exc, urllib.error.HTTPError):
+        return False  # a definite non-transient HTTP status (404 model-not-found, 400, …)
+
     import anthropic
 
-    return isinstance(exc, (anthropic.APIConnectionError, anthropic.APITimeoutError))
+    return isinstance(exc, (
+        anthropic.APIConnectionError, anthropic.APITimeoutError,
+        urllib.error.URLError, socket.timeout,  # connection refused / read timeout
+    ))
 
 
-def _transcribe_page_with_retry(
-    png_path, client, model, attempts: int = _RETRY_ATTEMPTS,
+def _transcribe_with_retry(
+    transcriber: Transcriber, png_path, attempts: int = _RETRY_ATTEMPTS,
     base_delay: float = _RETRY_BASE_DELAY,
 ) -> dict:
-    """``transcribe_page`` with exponential backoff on transient API errors. A
-    non-transient error, or the last attempt, re-raises for the caller to record."""
+    """``transcriber.transcribe`` with exponential backoff on transient API
+    errors. A non-transient error, or the last attempt, re-raises for the caller
+    to record."""
     for attempt in range(attempts):
         try:
-            return transcribe_page(png_path, client, model=model)
+            return transcriber.transcribe(png_path)
         except Exception as exc:
             if attempt + 1 >= attempts or not _is_transient(exc):
                 raise
@@ -184,8 +286,7 @@ def transcribe_case(
     con: duckdb.DuckDBPyConnection,
     pages_dir: str | Path,
     generated_at: str,
-    client,
-    model: str = DEFAULT_MODEL,
+    transcriber: Transcriber,
     force: bool = False,
     intake_dir: str | Path | None = None,
     max_workers: int = DEFAULT_WORKERS,
@@ -195,9 +296,9 @@ def transcribe_case(
     Two sources, cheapest first. **Text-layer pre-pass (ADR-0004):** when
     ``intake_dir`` is given, a born-digital page's exact text is read straight
     from its PDF (``source='pdf_text'``, ``fidelity=1.0``, no model call). Only a
-    page with no usable embedded text falls through to the **vision tier**
-    (``transcribe_page`` → ``source='ai'``), which needs the rendered PNG under
-    ``pages_dir``.
+    page with no usable embedded text falls through to the **vision tier** —
+    ``transcriber`` (cloud or local; ADR-0001/0002) → ``source='ai'`` — which
+    needs the rendered PNG under ``pages_dir``.
 
     The vision calls (network-bound) run concurrently in a bounded pool of
     ``max_workers``, retried with backoff on transient API errors; a page that
@@ -266,7 +367,7 @@ def transcribe_case(
         workers = max(1, min(max_workers, len(vision)))
         with ThreadPoolExecutor(max_workers=workers) as pool:
             future_to_page = {
-                pool.submit(_transcribe_page_with_retry, png, client, model):
+                pool.submit(_transcribe_with_retry, transcriber, png):
                     (page_id, case_id, rev)
                 for (page_id, case_id, rev, png) in vision
             }
