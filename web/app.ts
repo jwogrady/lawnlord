@@ -37,6 +37,14 @@ type Payload = {
 // Exploded lens — case → filing → image → document → page, with *every*
 // transcription variation compared side by side beside each page image so the
 // corpus can be QA'd (issue #125). Shapes mirror `lawnlord export-exploded`.
+// A changed token span vs the canonical anchor (ADR-0008, computed in the export
+// layer). `variation.start`/`.end` are token-index ranges into THIS reading's
+// whitespace-split tokens; the viewer highlights them without re-diffing (#126).
+type DivSpan = {
+	op: "replace" | "delete" | "insert";
+	anchor: { start: number; end: number; tokens: string[] };
+	variation: { start: number; end: number; tokens: string[] };
+};
 type Variation = {
 	source: string; // "pdf_text" = the record's own text layer; "ai" = a vision model
 	model: string | null; // vision model name; null for pdf_text
@@ -45,7 +53,8 @@ type Variation = {
 	fidelity: number | null;
 	text: string | null; // null = no reading captured; "" = an empty reading (shown explicitly)
 	agreement: number; // 0–1 similarity to the page's canonical anchor
-	divergence: unknown[]; // changed spans vs the anchor (consumed by a later lens, #126)
+	divergence: DivSpan[]; // changed spans vs the anchor; empty for the anchor (#126)
+	flagged: boolean; // export-decided review signal: low agreement or low fidelity
 };
 type ExPage = { id: string; pageNumber: number; png: string; transcriptions: Variation[] };
 type ExDoc = { id: string; title: string; pageCount: number | null; pages: ExPage[] };
@@ -295,12 +304,37 @@ function colTitle(k: ColKey): string {
 		: `AI${k.model ? ` · ${esc(k.model)}` : ""}`;
 }
 
+// Token indices in THIS reading that diverge from the anchor — the variation
+// side of each replace/insert span (a delete span has an empty variation range,
+// so it marks nothing in this column's text). Diffs come from the export layer.
+function divergentTokens(spans: DivSpan[]): Set<number> {
+	const marked = new Set<number>();
+	for (const s of spans) for (let i = s.variation.start; i < s.variation.end; i++) marked.add(i);
+	return marked;
+}
+
+// Render text with the divergent tokens wrapped in <mark>, preserving the
+// original whitespace. The i-th run of non-whitespace is token i — the same unit
+// the export split on (`str.split()`) — so no re-diffing happens client-side.
+function highlightText(text: string, marked: Set<number>): string {
+	let i = 0;
+	return text.replace(/\s+|\S+/g, (run) => {
+		if (/^\s/.test(run)) return esc(run);
+		const idx = i++;
+		const e = esc(run);
+		return marked.has(idx) ? `<mark class="diff">${e}</mark>` : e;
+	});
+}
+
 // A reading's body, distinguishing "no reading captured" (null) from an
 // explicitly empty reading ("") so an empty string never reads as untranscribed.
+// Divergent tokens are highlighted against the canonical anchor (#126).
 function readingBody(v: Variation): string {
 	if (v.text == null) return '<div class="cmp-empty">no reading captured</div>';
 	if (v.text === "") return '<div class="cmp-empty">empty reading — the model returned no text</div>';
-	return `<pre class="cmp-text">${esc(v.text)}</pre>`;
+	const marked = divergentTokens(v.divergence);
+	const body = marked.size ? highlightText(v.text, marked) : esc(v.text);
+	return `<pre class="cmp-text">${body}</pre>`;
 }
 
 // One comparison cell. Canonical truth (the PDF text layer) is styled as the
@@ -309,12 +343,15 @@ function cmpCell(v: Variation | undefined, k: ColKey): string {
 	if (!v)
 		return `<div class="cmp-cell missing"><div class="cmp-head"><span class="badge badge-missing">${colTitle(k)}</span></div><div class="cmp-empty">— not run for this page</div></div>`;
 	const canonical = v.source === "pdf_text";
+	const flag = v.flagged
+		? '<span class="badge badge-flag" title="flagged for review: low agreement or low fidelity">⚑ flagged</span>'
+		: "";
 	const head = canonical
 		? `<span class="badge badge-record">THE RECORD · PDF text layer</span><span class="cmp-meta muted">exact text from the filed PDF</span>`
-		: `<span class="badge badge-ai">AI${v.model ? ` · ${esc(v.model)}` : ""}</span><span class="cmp-meta muted">${
+		: `<span class="badge badge-ai">AI${v.model ? ` · ${esc(v.model)}` : ""}</span>${flag}<span class="cmp-meta muted">${
 				v.fidelity != null ? `fidelity ${v.fidelity.toFixed(2)} · ` : ""
 			}agreement ${(v.agreement * 100).toFixed(0)}%</span>`;
-	return `<div class="cmp-cell ${canonical ? "record" : "derived"}"><div class="cmp-head">${head}</div>${readingBody(v)}</div>`;
+	return `<div class="cmp-cell ${canonical ? "record" : "derived"}${v.flagged ? " flagged" : ""}"><div class="cmp-head">${head}</div>${readingBody(v)}</div>`;
 }
 
 function cmpRow(p: ExPage, keys: ColKey[]): string {

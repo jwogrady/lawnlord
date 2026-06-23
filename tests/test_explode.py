@@ -158,7 +158,7 @@ def test_export_exploded_shape(tmp_path):
     assert txns[0] == {
         "source": "pdf_text", "model": None, "rev": 0,
         "createdAt": "t", "fidelity": 1.0, "text": "TRUTH",
-        "agreement": 1.0, "divergence": [],
+        "agreement": 1.0, "divergence": [], "flagged": False,
     }
     assert txns[1]["text"] == "GEMMA" and txns[1]["rev"] == 1 and txns[1]["fidelity"] == 0.8
     assert txns[2]["text"] == "LLAVA"

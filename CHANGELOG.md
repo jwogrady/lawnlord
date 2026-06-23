@@ -14,6 +14,12 @@ closed.
 
 ### Added
 
+- **Diff-highlighting in the comparison viewer** (#126). Each transcription column in the Exploded
+  lens now highlights the tokens that **diverge from the canonical anchor**, and flags readings that
+  fall below the agreement/fidelity thresholds with an inline ⚑. The diff spans and the flag come
+  from the export layer (`export-exploded` now carries a per-reading `flagged` boolean alongside the
+  existing `divergence`/`agreement`, decided with the same thresholds the metrics rollup uses) — the
+  viewer only renders them, never re-diffing or re-scoring client-side. Refs ADR-0008.
 - **Fully-exploded QA comparison viewer** (#125). The Exploded lens is now a per-page comparison
   grid that QA's the whole transcription corpus: each page image sits beside **one column per
   variation present** — the PDF text layer and every vision model's reading — read straight from

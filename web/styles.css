@@ -390,6 +390,25 @@ iframe.snap {
 	margin: 0;
 }
 
+/* Tokens that diverge from the canonical anchor (diff comes from the export). */
+.cmp-text mark.diff {
+	background: var(--gold);
+	color: var(--ink);
+	border-radius: 2px;
+	padding: 0 0.1em;
+}
+
+/* A reading flagged for review (low agreement / low fidelity) — export-decided. */
+.cmp-cell.flagged {
+	border-left-color: var(--gold);
+}
+
+.badge-flag {
+	background: var(--gold-deep);
+	color: var(--ink);
+	border-color: var(--gold-deep);
+}
+
 .cmp-empty {
 	font-size: 0.8rem;
 	font-style: italic;

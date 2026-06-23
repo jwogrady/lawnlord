@@ -22,8 +22,10 @@ Lenses:
   **case → filing → image → document → page** by breadcrumb; each page image
   sits beside a comparison grid with one column per transcription variation (the
   PDF text layer plus each vision model). The canonical record is styled apart
-  from derived AI readings, and missing/empty readings show explicitly. It only
-  renders what the exports carry — it never derives.
+  from derived AI readings, and missing/empty readings show explicitly. Tokens
+  that diverge from the canonical anchor are highlighted and low-confidence
+  readings flagged (⚑), both from the export's `divergence`/`flagged` fields. It
+  only renders what the exports carry — it never derives, re-diffs, or re-scores.
 
 Run it against a case built by `lawnlord import`:
 
