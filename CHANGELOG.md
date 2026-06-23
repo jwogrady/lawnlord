@@ -14,6 +14,16 @@ closed.
 
 ### Added
 
+- **Spatial-anchor layer — boxes per text span** (#128, first slice; ADR-0009). A new additive
+  `page_regions` table (schema v11) captures a bounding box per whitespace token of each born-digital
+  page, anchored to a source row via a generic `(anchor_kind, anchor_id)` — a `page_text` variation
+  today, an analysis entity later — so it is a reusable page-region primitive, not transcription-specific.
+  Geometry comes from the PDF's own glyphs via pypdfium2, stored **normalized 0–1 with a top-left
+  origin** so it overlays the rendered page PNG at any DPI. A new `lawnlord regions` step captures it
+  (deterministic; ids hash structure, never coordinates) and a read-only `lawnlord export-regions
+  --page` serves it for the on-image highlight renderer (#129). A page whose stored text no longer
+  matches the PDF, or with no text layer, is skipped — a region is **never fabricated**. Capturing
+  vision-model-returned boxes is deferred to a follow-up (#128b).
 - **Diff-highlighting in the comparison viewer** (#126). Each transcription column in the Exploded
   lens now highlights the tokens that **diverge from the canonical anchor**, and flags readings that
   fall below the agreement/fidelity thresholds with an inline ⚑. The diff spans and the flag come

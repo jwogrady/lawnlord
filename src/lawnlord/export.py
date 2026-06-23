@@ -295,6 +295,24 @@ def export_page(con: duckdb.DuckDBPyConnection, page_id: str) -> dict:
     return {"page": page}
 
 
+def export_regions(con: duckdb.DuckDBPyConnection, *, page_id: str) -> dict:
+    """The spatial-anchor regions for a page (ADR-0009), read-only — the geometry
+    the on-image highlight renderer (#129) overlays. Each region is a normalized
+    ``0..1`` top-left box ``(x0, y0, x1, y1)`` anchored to a source row via
+    ``(anchorKind, anchorId)`` and covering the anchor text's
+    ``[charStart, charEnd)`` token, ordered by anchor then span. An empty list
+    when a page has no captured geometry — the renderer falls back to text-only."""
+    regions = _rows(
+        con,
+        "SELECT id, anchor_id AS anchorId, anchor_kind AS anchorKind, "
+        "span_index AS spanIndex, char_start AS charStart, char_end AS charEnd, "
+        "x0, y0, x1, y1, origin, confidence FROM page_regions "
+        "WHERE page_id = ? ORDER BY anchor_id, span_index",
+        [page_id],
+    )
+    return {"pageId": page_id, "regions": regions}
+
+
 def _documents_for(
     con: duckdb.DuckDBPyConnection, where: str = "", params: list | None = None
 ) -> list[dict]:

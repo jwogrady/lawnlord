@@ -23,10 +23,11 @@ from rich.table import Table
 from .console import console
 from .db import apply_schema, open_case_db
 from .explode import explode_case
-from .export import export_actual, export_exploded, export_metrics
+from .export import export_actual, export_exploded, export_metrics, export_regions
 from .ingest import ingest_case
 from .intake import load_intake, scaffold
 from .reader import captured_at, extract_zip, find_intake_dir
+from .regions import capture_pdf_regions
 from .transcribe import (
     DEFAULT_LOCAL_MODEL,
     DEFAULT_MODEL,
@@ -133,6 +134,27 @@ def build_parser() -> argparse.ArgumentParser:
     p_metrics.add_argument(
         "--image", metavar="IMAGE_ID", default=None,
         help="Scope the rollup to a single image",
+    )
+
+    p_export_r = sub.add_parser(
+        "export-regions",
+        help="Print the spatial-anchor regions (normalized boxes per text span) "
+        "for one page as JSON, for the on-image highlight renderer. ADR-0009.",
+    )
+    p_export_r.add_argument(
+        "--case-dir", default=".", help="Case root holding lawnlord.duckdb (default: cwd)"
+    )
+    p_export_r.add_argument(
+        "--page", required=True, metavar="PAGE_ID", help="The page to read regions for"
+    )
+
+    p_regions = sub.add_parser(
+        "regions",
+        help="Capture a spatial-anchor layer: bounding boxes per text span from "
+        "PDF geometry for born-digital pages (additive, deterministic). ADR-0009.",
+    )
+    p_regions.add_argument(
+        "--case-dir", default=".", help="Case root holding lawnlord.duckdb (default: cwd)"
     )
 
     p_explode = sub.add_parser(
@@ -374,6 +396,16 @@ def _main(argv: list[str] | None = None) -> None:
             con.close()
         return
 
+    if args.command == "export-regions":
+        import json
+
+        con = open_case_db(Path(args.case_dir) / "lawnlord.duckdb", read_only=True)
+        try:
+            print(json.dumps(export_regions(con, page_id=args.page)))
+        finally:
+            con.close()
+        return
+
     if args.command == "explode":
         case_dir = Path(args.case_dir).resolve()
         intake_dir = find_intake_dir(case_dir)
@@ -396,6 +428,31 @@ def _main(argv: list[str] | None = None) -> None:
             )
         if stats["skipped_images"]:
             console.print(f"[yellow]Skipped (no source PDF):[/] {len(stats['skipped_images'])}")
+        console.print("[green]Done.[/]")
+        return
+
+    if args.command == "regions":
+        case_dir = Path(args.case_dir).resolve()
+        intake_dir = find_intake_dir(case_dir)
+        con = open_case_db(case_dir / "lawnlord.duckdb")
+        apply_schema(con)
+        stats = capture_pdf_regions(con, intake_dir, captured_at(intake_dir))
+        con.close()
+        table = Table(title="Spatial anchors (PDF geometry → boxes per span)")
+        table.add_column("Metric")
+        table.add_column("Value", justify="right")
+        table.add_row("Regions captured", str(stats["regions"]))
+        table.add_row("Pages with geometry", str(stats["pages_with_geometry"]))
+        console.print(table)
+        if stats["skipped_no_pdf"]:
+            console.print(
+                f"[yellow]Skipped (no source PDF / page):[/] {len(stats['skipped_no_pdf'])}"
+            )
+        if stats["skipped_mismatch"]:
+            console.print(
+                f"[yellow]Skipped (text/geometry mismatch — not fabricated):[/] "
+                f"{len(stats['skipped_mismatch'])}"
+            )
         console.print("[green]Done.[/]")
         return
 
