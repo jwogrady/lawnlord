@@ -14,6 +14,17 @@ closed.
 
 ### Added
 
+- **Confidence gauges for the transcription corpus** (#127; ADR-0007/0008). The Exploded lens now
+  opens with an at-a-glance confidence read at both the **case** and **image** levels: coverage
+  (the fraction of expected `page × variation` cells present), cross-model agreement, a per-model
+  fidelity distribution (mean/range/count), and a flagged-page count. Below it sits a **flagged-page
+  worklist** — every page flagged for review, each tagged with *why* it tripped (**divergent** /
+  **low fidelity** / **missing reading**) and clickable to drill straight to that page. Every number
+  is rendered from a new read-only `/api/metrics` (which serves `lawnlord export-metrics`); the viewer
+  never recomputes agreement, fidelity, or coverage. To label the worklist without re-applying the
+  export's thresholds, the metrics rollup now also emits `flaggedPageDetails` (the reasons per flagged
+  page) alongside the existing `flaggedPages`. The panel is purely additive — if metrics are
+  unavailable the lens renders exactly as before.
 - **On-image highlight + click-to-locate renderer** (#129; ADR-0009). A reusable region-overlay
   primitive paints the normalized spatial-anchor boxes (#128) over a page image and links them to the
   record text **bidirectionally** — click a token to highlight its box, click a box to highlight its
