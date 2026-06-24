@@ -14,6 +14,14 @@ closed.
 
 ### Added
 
+- **On-image highlight + click-to-locate renderer** (#129; ADR-0009). A reusable region-overlay
+  primitive paints the normalized spatial-anchor boxes (#128) over a page image and links them to the
+  record text **bidirectionally** — click a token to highlight its box, click a box to highlight its
+  token. Transcription divergence is the first consumer: tokens that diverge from the canonical anchor
+  are pre-marked from the export's diff spans. Pages without a region layer fall back to text-only, and
+  the overlay is never mounted onto a stale page. The renderer addresses tokens only by `spanIndex`, so
+  later analytical layers (citations/claims/defenses, #38/#118) can drive the same primitive. A
+  read-only `/api/regions` endpoint backs it via `export-regions`.
 - **Spatial-anchor layer — boxes per text span** (#128, first slice; ADR-0009). A new additive
   `page_regions` table (schema v11) captures a bounding box per whitespace token of each born-digital
   page, anchored to a source row via a generic `(anchor_kind, anchor_id)` — a `page_text` variation

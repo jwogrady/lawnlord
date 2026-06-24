@@ -69,6 +69,26 @@ type ExImage = {
 type Exploded = { images: ExImage[] };
 type ColKey = { source: string; model: string | null };
 
+// A spatial-anchor region (ADR-0009, from `export-regions`): a normalized 0..1
+// top-left box for one token of a page's canonical text, addressed by spanIndex
+// (the token ordinal). The reusable on-image highlight renderer (#129) overlays
+// these and links them to the text bidirectionally.
+type Region = {
+	id: string;
+	anchorId: string;
+	anchorKind: string;
+	spanIndex: number;
+	charStart: number | null;
+	charEnd: number | null;
+	x0: number;
+	y0: number;
+	x1: number;
+	y1: number;
+	origin: string;
+	confidence: number | null;
+};
+type PageRegions = { pageId: string; regions: Region[] };
+
 const app = document.getElementById("app") as HTMLElement;
 const headerEl = document.getElementById("caseheader") as HTMLElement;
 const lensesEl = document.getElementById("lenses") as HTMLElement;
@@ -375,6 +395,153 @@ function cmpRow(p: ExPage, keys: ColKey[]): string {
     </div>`;
 }
 
+// Per-page regions, fetched lazily on first focus (keyed by page id).
+const regionsCache = new Map<string, Region[]>();
+
+// The record (pdf_text) reading at page focus, with each token wrapped in a
+// clickable span addressed by its ordinal — the same index the regions use, so
+// token ↔ box linking is a direct lookup. Whitespace is preserved verbatim.
+function interactiveRecordBody(v: Variation): string {
+	if (v.text == null) return '<div class="cmp-empty">no reading captured</div>';
+	if (v.text === "") return '<div class="cmp-empty">empty reading — the model returned no text</div>';
+	let i = 0;
+	const body = v.text.replace(/\s+|\S+/g, (run) => {
+		if (/^\s/.test(run)) return esc(run);
+		return `<span class="tok" data-span="${i++}">${esc(run)}</span>`;
+	});
+	return `<pre class="cmp-text">${body}</pre>`;
+}
+
+// THE reusable on-image highlight renderer (#129, a layer:platform primitive):
+// given the element wrapping a page image and the page's anchored regions, paint
+// one box per region and expose highlight/mark/clear + a click hook. Boxes are
+// positioned by the regions' normalized 0..1 coords, so they track the image at
+// any size. Future consumers (citations/claims/defenses; #38/#118) drive the
+// same renderer with their own anchored regions — only spanIndex addressing is
+// assumed, nothing transcription-specific.
+type RegionOverlay = {
+	highlight(spanIndices: number[]): void; // exclusive "active" set (highlight([]) clears)
+	mark(spanIndices: number[], cls: string): void; // additive class (e.g. "diverged")
+	onPick(cb: (spanIndex: number) => void): void;
+};
+function mountRegionOverlay(wrap: HTMLElement, regions: Region[]): RegionOverlay {
+	const layer = document.createElement("div");
+	layer.className = "region-layer";
+	const boxes = new Map<number, HTMLElement>();
+	let pick: (spanIndex: number) => void = () => {};
+	for (const r of regions) {
+		const box = document.createElement("div");
+		box.className = "region-box";
+		box.style.left = `${r.x0 * 100}%`;
+		box.style.top = `${r.y0 * 100}%`;
+		box.style.width = `${(r.x1 - r.x0) * 100}%`;
+		box.style.height = `${(r.y1 - r.y0) * 100}%`;
+		box.dataset.span = String(r.spanIndex);
+		box.onclick = () => pick(r.spanIndex);
+		layer.appendChild(box);
+		boxes.set(r.spanIndex, box);
+	}
+	wrap.appendChild(layer);
+	return {
+		highlight(spanIndices) {
+			for (const b of boxes.values()) b.classList.remove("active");
+			for (const i of spanIndices) boxes.get(i)?.classList.add("active");
+		},
+		mark(spanIndices, cls) {
+			for (const i of spanIndices) boxes.get(i)?.classList.add(cls);
+		},
+		onPick(cb) {
+			pick = cb;
+		},
+	};
+}
+
+// Mount the overlay and wire token ↔ box bidirectionally for the focused page.
+// Divergence is the first consumer: the record tokens any AI reading replaced or
+// dropped (from the export's divergence spans) are pre-marked on the image, so
+// disagreement shows without a click. No regions (a scanned page) → text-only.
+async function wireFocusPage(page: ExPage): Promise<void> {
+	const wrap = app.querySelector(".cmp-imgwrap") as HTMLElement | null;
+	if (!wrap) return;
+	let regions = regionsCache.get(page.id);
+	if (regions === undefined) {
+		// Only a successful read is cached; a transient failure (a 500 or a
+		// network error) is left uncached so the next focus on this page retries
+		// rather than being stuck text-only for the session.
+		try {
+			const res = await fetch(`/api/regions?page=${encodeURIComponent(page.id)}`);
+			if (!res.ok) return;
+			const pr = (await res.json()) as PageRegions;
+			regions = pr.regions.filter((r) => r.origin === "pdf_text");
+		} catch {
+			return;
+		}
+		regionsCache.set(page.id, regions);
+	}
+	// The fetch may have resolved after the user navigated away: only mount if
+	// this page is still the focused one and its wrapper is still in the live DOM.
+	if (exPageId !== page.id || !wrap.isConnected) return;
+	if (!regions.length) return; // graceful text-only fallback
+	const overlay = mountRegionOverlay(wrap, regions);
+
+	// Record tokens indexed by ordinal for O(1) lookup (mirrors the box map).
+	const tokBySpan = new Map<number, HTMLElement>();
+	for (const el of app.querySelectorAll("[data-record] .tok")) {
+		const t = el as HTMLElement;
+		tokBySpan.set(Number(t.dataset.span), t);
+	}
+
+	// Diverged record tokens = the anchor-side of every AI reading's divergence
+	// spans (token-index ranges from the export — never re-diffed here).
+	const diverged = new Set<number>();
+	for (const v of page.transcriptions) {
+		if (v.source === "pdf_text") continue;
+		for (const s of v.divergence)
+			for (let i = s.anchor.start; i < s.anchor.end; i++) diverged.add(i);
+	}
+	overlay.mark([...diverged], "diverged");
+	for (const i of diverged) tokBySpan.get(i)?.classList.add("diverged");
+
+	// One selection routine drives both directions, so clicking a word and
+	// clicking its box behave identically: highlight the box, activate the token,
+	// and reveal both (cheap — touches only the previously- and newly-active one).
+	let active: HTMLElement | null = null;
+	const select = (span: number) => {
+		overlay.highlight([span]);
+		active?.classList.remove("active");
+		active = tokBySpan.get(span) ?? null;
+		active?.classList.add("active");
+		active?.scrollIntoView({ block: "nearest" });
+		wrap.querySelector<HTMLElement>(`.region-box[data-span="${span}"]`)?.scrollIntoView({ block: "nearest" });
+	};
+	overlay.onPick(select);
+	for (const [span, t] of tokBySpan) t.onclick = () => select(span);
+}
+
+// The focused single page: the image with its region overlay beside the record
+// (interactive tokens) and the other readings (normal comparison cells).
+function focusPageHtml(page: ExPage): string {
+	const keys = colKeys([page]);
+	const cells =
+		keys
+			.map((k) => {
+				const v = page.transcriptions.find(
+					(t) => t.source === k.source && (t.model ?? "") === (k.model ?? ""),
+				);
+				if (v && v.source === "pdf_text")
+					return `<div class="cmp-cell record" data-record="1"><div class="cmp-head"><span class="badge badge-record">THE RECORD · PDF text layer</span><span class="cmp-meta muted">click a word to locate it on the page</span></div>${interactiveRecordBody(v)}</div>`;
+				return cmpCell(v, k);
+			})
+			.join("") ||
+		'<div class="cmp-empty">no transcription yet — run <code>lawnlord transcribe</code></div>';
+	return `<div class="cmp-row">
+      <figure class="cmp-img"><figcaption>p.${page.pageNumber}</figcaption>
+        <div class="cmp-imgwrap"><img src="/png/${page.png.split("/").map(encodeURIComponent).join("/")}" alt="page ${page.pageNumber}" /></div>
+      </figure>
+      <div class="cmp-cells">${cells}</div>
+    </div>`;
+}
+
 // The breadcrumb across the five levels; each set crumb is clickable to pop the
 // focus back up to that level (clearing the deeper ones). The filing label is
 // resolved from the buckets (always populated) so it reads correctly even at the
@@ -463,7 +630,7 @@ async function renderExploded(): Promise<void> {
 		body = `<section class="cmp-doc"><h3>${esc(doc.title)} <span class="muted">${doc.pages.length} pp</span></h3>
         ${doc.pages.map((p) => cmpRow(p, keys)).join("")}</section>`;
 	} else if (level === "page" && page) {
-		body = `<section class="cmp-doc cmp-focus">${cmpRow(page, colKeys([page]))}</section>`;
+		body = `<section class="cmp-doc cmp-focus">${focusPageHtml(page)}</section>`;
 	}
 
 	app.innerHTML = `<section class="qa">${exBreadcrumb(filingLabel, cur, doc, page)}${body}</section>`;
@@ -503,6 +670,10 @@ async function renderExploded(): Promise<void> {
 			exPageId = (el as HTMLElement).dataset.page as string;
 			renderExploded();
 		};
+
+	// On the focused page, mount the on-image highlight overlay and wire it to
+	// the record tokens (async: regions are fetched lazily).
+	if (level === "page" && page) void wireFocusPage(page);
 }
 
 function render(): void {
