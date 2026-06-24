@@ -252,6 +252,148 @@ iframe.snap {
 	color: var(--muted);
 }
 
+/* Confidence gauges for the transcription corpus (#127) — case- and image-level
+   coverage / agreement / fidelity / flagged-page count. Rendered from
+   export-metrics; the viewer never recomputes these. */
+.gauges {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+	gap: 0.75rem;
+	margin-bottom: 1rem;
+}
+
+.gauge {
+	display: flex;
+	flex-direction: column;
+	gap: 0.15rem;
+	background: var(--panel);
+	border: 1px solid var(--line);
+	border-radius: 6px;
+	padding: 0.6rem 0.75rem;
+}
+
+.gauge-label {
+	font-size: 0.72rem;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	color: var(--muted);
+}
+
+.gauge-val {
+	font-size: 1.5rem;
+	font-weight: 600;
+	color: var(--gold);
+}
+
+.gauge-val.warn {
+	color: var(--gold-deep);
+}
+
+.gauge-sub {
+	font-size: 0.75rem;
+}
+
+.gauge-fid {
+	grid-column: span 2;
+}
+
+.fidtab {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 0.78rem;
+}
+
+.fidtab th {
+	text-align: left;
+	color: var(--muted);
+	font-weight: 500;
+	padding-right: 0.6rem;
+}
+
+.fidtab td {
+	padding-right: 0.6rem;
+	white-space: nowrap;
+}
+
+/* The flagged-page worklist: divergent / low-fidelity / missing, drillable. */
+.worklist {
+	margin-bottom: 1rem;
+	border: 1px solid var(--line);
+	border-radius: 6px;
+	padding: 0.5rem 0.75rem;
+	background: var(--panel);
+}
+
+.worklist summary {
+	cursor: pointer;
+	color: var(--gold);
+	font-size: 0.85rem;
+}
+
+.worklist ul {
+	list-style: none;
+	margin: 0.5rem 0 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 0.3rem;
+}
+
+.worklist li {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.4rem;
+}
+
+.worklink {
+	background: transparent;
+	border: 1px solid var(--line);
+	color: var(--cream);
+	padding: 0.2rem 0.5rem;
+	border-radius: 4px;
+	cursor: pointer;
+	font-size: 0.82rem;
+}
+
+.worklink:hover:not(:disabled) {
+	border-color: var(--gold);
+}
+
+.worklink:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+
+.worklist-clean {
+	margin-bottom: 1rem;
+	font-size: 0.85rem;
+}
+
+/* Why a page tripped the flag — one badge per reason. */
+.reason {
+	font-size: 0.68rem;
+	padding: 0 0.4em;
+	border-radius: 3px;
+	border: 1px solid var(--line);
+	color: var(--muted);
+}
+
+.reason-divergent {
+	color: var(--gold);
+	border-color: var(--gold-deep);
+}
+
+.reason-low_fidelity {
+	color: var(--gold-deep);
+	border-color: var(--gold-deep);
+}
+
+.reason-missing {
+	color: var(--muted);
+	border-style: dashed;
+}
+
 /* Drill-down cards at the case / filing / image levels. */
 .navgrid {
 	display: grid;

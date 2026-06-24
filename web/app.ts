@@ -69,6 +69,22 @@ type ExImage = {
 type Exploded = { images: ExImage[] };
 type ColKey = { source: string; model: string | null };
 
+// Divergence/confidence rollups from `lawnlord export-metrics` (#127, ADR-0008).
+// One rollup per scope (the whole case, and each image); the viewer renders
+// these numbers verbatim and never recomputes agreement/fidelity/coverage.
+type FidelityStat = { count: number; min: number; mean: number; max: number };
+type FlaggedDetail = { pageId: string; reasons: string[] }; // "divergent" | "low_fidelity" | "missing"
+type Rollup = {
+	pages: number;
+	coverage: { fraction: number; present: number; expected: number; expectedVariations: ColKey[] };
+	meanAgreement: number; // mean over non-anchor readings (0–1)
+	fidelityByModel: Record<string, FidelityStat>;
+	flaggedPageCount: number;
+	flaggedPages: string[];
+	flaggedPageDetails: FlaggedDetail[];
+};
+type Metrics = { case: Rollup; images: (Rollup & { imageId: string })[] };
+
 // A spatial-anchor region (ADR-0009, from `export-regions`): a normalized 0..1
 // top-left box for one token of a page's canonical text, addressed by spanIndex
 // (the token ordinal). The reusable on-image highlight renderer (#129) overlays
@@ -95,6 +111,7 @@ const lensesEl = document.getElementById("lenses") as HTMLElement;
 
 let data: Payload;
 let exploded: Exploded | null = null; // lazily fetched on first switch to the Exploded lens
+let metrics: Metrics | null = null; // confidence rollups, fetched alongside the exploded corpus (#127)
 // Exploded-lens drill-down focus; the deepest non-empty id is the active level
 // (case → filing → image → document → page). Cleared from the breadcrumb.
 let exFiling = ""; // focused filing = an event id (or the UNFILED sentinel)
@@ -560,10 +577,114 @@ function exBreadcrumb(
 	return `<nav class="crumbs">${crumbs.join('<span class="sep">›</span>')}</nav>`;
 }
 
+// Where a page lives in the drill-down tree, so a flagged-worklist entry can
+// jump straight to it (set image → document → page in one click).
+type PageLoc = { imageId: string; docId: string; pageNumber: number; imageTitle: string };
+function pageLocations(): Map<string, PageLoc> {
+	const idx = new Map<string, PageLoc>();
+	for (const img of exploded?.images ?? [])
+		for (const d of img.documents)
+			for (const p of d.pages)
+				idx.set(p.id, {
+					imageId: img.imageId,
+					docId: d.id,
+					pageNumber: p.pageNumber,
+					imageTitle: img.title || img.filename,
+				});
+	return idx;
+}
+
+const pct = (n: number) => `${Math.round(n * 100)}%`;
+
+// Human label for a flag reason (the export's enum → viewer copy).
+const REASON_LABEL: Record<string, string> = {
+	divergent: "divergent",
+	low_fidelity: "low fidelity",
+	missing: "missing reading",
+};
+
+// A confidence read for one scope (the whole case, or one image): coverage,
+// cross-model agreement, per-model fidelity distribution, and a flagged-page
+// count — every number straight from `export-metrics` (the viewer renders, the
+// export decides). `scope` only labels the panel.
+function confidencePanel(roll: Rollup, scope: string): string {
+	const cov = roll.coverage;
+	const fidRows =
+		Object.entries(roll.fidelityByModel ?? {})
+			.map(
+				([model, s]) =>
+					`<tr><td>${esc(model)}</td><td>${s.mean.toFixed(2)}</td><td class="muted">${s.min.toFixed(2)}–${s.max.toFixed(2)}</td><td class="muted">${s.count}</td></tr>`,
+			)
+			.join("") || '<tr><td colspan="4" class="muted">no AI readings with fidelity yet</td></tr>';
+
+	return `<section class="gauges">
+      <div class="gauge">
+        <span class="gauge-label">Coverage</span>
+        <span class="gauge-val">${pct(cov.fraction)}</span>
+        <span class="gauge-sub muted">${cov.present}/${cov.expected} cells · ${roll.pages} pp</span>
+      </div>
+      <div class="gauge">
+        <span class="gauge-label">Cross-model agreement</span>
+        <span class="gauge-val">${pct(roll.meanAgreement)}</span>
+        <span class="gauge-sub muted">mean, non-anchor readings</span>
+      </div>
+      <div class="gauge">
+        <span class="gauge-label">Flagged pages</span>
+        <span class="gauge-val${roll.flaggedPageCount ? " warn" : ""}">${roll.flaggedPageCount ?? 0}</span>
+        <span class="gauge-sub muted">of ${roll.pages} (${scope})</span>
+      </div>
+      <div class="gauge gauge-fid">
+        <span class="gauge-label">Fidelity by model</span>
+        <table class="fidtab"><thead><tr><th>model</th><th>mean</th><th>range</th><th>n</th></tr></thead><tbody>${fidRows}</tbody></table>
+      </div>
+    </section>`;
+}
+
+// The flagged-page worklist: each flagged page with the reasons it tripped,
+// clickable to drill straight to that page. Reasons and the flag decision both
+// come from the export (`flaggedPageDetails`).
+function worklist(roll: Rollup, locs: Map<string, PageLoc>): string {
+	const details = roll.flaggedPageDetails ?? [];
+	if (!details.length)
+		return '<p class="worklist-clean muted">No pages flagged for review in this scope.</p>';
+	const items = details
+		.map((d) => {
+			const loc = locs.get(d.pageId);
+			const label = loc ? `${esc(loc.imageTitle)} · p.${loc.pageNumber}` : esc(d.pageId);
+			const badges = d.reasons
+				.map((r) => {
+					// Sanitize the class suffix: the label text is escaped, but the
+					// class name is markup, so never trust the export's enum verbatim.
+					const cls = r.replace(/[^a-z0-9_]/gi, "");
+					return `<span class="reason reason-${cls}">${esc(REASON_LABEL[r] ?? r)}</span>`;
+				})
+				.join("");
+			return `<li><button class="worklink" data-goto="${esc(d.pageId)}"${
+				loc ? "" : " disabled"
+			}>${label}</button>${badges}</li>`;
+		})
+		.join("");
+	return `<details class="worklist" open>
+      <summary>Flagged-page worklist <span class="muted">(${details.length})</span></summary>
+      <ul>${items}</ul>
+    </details>`;
+}
+
 async function renderExploded(): Promise<void> {
 	if (exploded === null) {
 		app.innerHTML = '<p class="muted">Loading exploded pages…</p>';
-		exploded = (await (await fetch("/api/exploded")).json()) as Exploded;
+		// The exploded corpus is required; the confidence metrics are an additive
+		// overlay, so a metrics failure must never block the lens. Fetch both
+		// together (independent CLI invocations) and let metrics degrade to null —
+		// the gauges and worklist simply omit, exactly as before #127.
+		const [ex, m] = await Promise.all([
+			fetch("/api/exploded").then((r) => r.json() as Promise<Exploded>),
+			fetch("/api/metrics")
+				.then((r) => (r.ok ? (r.json() as Promise<Metrics>) : null))
+				.catch(() => null),
+		]);
+		exploded = ex;
+		metrics = m;
 	}
 	const images = exploded.images;
 	if (!images.length) {
@@ -588,10 +709,16 @@ async function renderExploded(): Promise<void> {
 			: (buckets.find((b) => b.id === exFiling)?.event ?? "Filing")
 		: "";
 
+	// One corpus-wide page→location index per render, reused by the worklist
+	// panels and the [data-goto] click-through wiring below.
+	const locs = pageLocations();
+
 	const level = exLevel();
 	let body = "";
 	if (level === "case") {
-		body = `<div class="navgrid">${buckets
+		// Whole-case confidence read + the flagged-page worklist above the filings.
+		const m = metrics?.case;
+		body = `${m ? confidencePanel(m, "case") + worklist(m, locs) : ""}<div class="navgrid">${buckets
 			.map((b) => {
 				const pp = b.images.reduce((n, i) => n + i.documents.reduce((m, d) => m + d.pages.length, 0), 0);
 				return `<button class="navcard" data-filing="${esc(b.id)}">
@@ -614,8 +741,10 @@ async function renderExploded(): Promise<void> {
 			})
 			.join("")}</div>`;
 	} else if (level === "image" && cur) {
-		// Each document as a section, with its pages already laid out as comparison grids.
-		body = cur.documents
+		// This image's confidence read + worklist, then each document's comparison grids.
+		const im = metrics?.images.find((i) => i.imageId === cur.imageId);
+		body = im ? confidencePanel(im, "this image") + worklist(im, locs) : "";
+		body += cur.documents
 			.map((d) => {
 				const keys = colKeys(d.pages);
 				return `<section class="cmp-doc">
@@ -668,6 +797,17 @@ async function renderExploded(): Promise<void> {
 	for (const el of app.querySelectorAll("[data-page]"))
 		(el as HTMLButtonElement).onclick = () => {
 			exPageId = (el as HTMLElement).dataset.page as string;
+			renderExploded();
+		};
+	// A worklist entry jumps to its page wherever the current scope is, by setting
+	// the full image → document → page focus path at once (reusing `locs` above).
+	for (const el of app.querySelectorAll("[data-goto]"))
+		(el as HTMLButtonElement).onclick = () => {
+			const loc = locs.get((el as HTMLElement).dataset.goto as string);
+			if (!loc) return;
+			exImageId = loc.imageId;
+			exDocId = loc.docId;
+			exPageId = (el as HTMLElement).dataset.goto as string;
 			renderExploded();
 		};
 
