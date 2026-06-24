@@ -79,6 +79,28 @@ const server = Bun.serve({
 				headers: { "content-type": "application/json" },
 			});
 		},
+		// The divergence/confidence rollups (coverage, mean agreement, per-model
+		// fidelity, flagged-page worklist) at the case and image levels (#127). The
+		// viewer renders these; it never recomputes them.
+		"/api/metrics": async () => {
+			try {
+				const out = await Bun.$`uv run lawnlord export-metrics --case-dir ${CASE_DIR}`
+					.cwd(REPO_ROOT)
+					.quiet()
+					.text();
+				return new Response(out, {
+					headers: { "content-type": "application/json" },
+				});
+			} catch (err) {
+				// A nonzero exit (locked DB, CLI error) becomes a 500 the client reads
+				// as "no metrics available" — the Exploded lens still renders, just
+				// without the additive confidence panel.
+				return new Response(JSON.stringify({ error: String(err) }), {
+					status: 500,
+					headers: { "content-type": "application/json" },
+				});
+			}
+		},
 		// The spatial-anchor regions for one page (?page=ID) — normalized boxes the
 		// on-image highlight renderer overlays (ADR-0009). Read-only.
 		"/api/regions": async (req) => {

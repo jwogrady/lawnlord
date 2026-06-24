@@ -502,6 +502,9 @@ def _rollup(pages: list[dict]) -> dict:
     - **flaggedPages**: page ids flagged for review — any reading below
       :data:`AGREEMENT_FLAG_THRESHOLD`, any fidelity below
       :data:`FIDELITY_FLAG_THRESHOLD`, or an expected variation missing.
+    - **flaggedPageDetails**: the same flagged pages, each with the sorted
+      ``reasons`` that fired (``"divergent"`` / ``"low_fidelity"`` /
+      ``"missing"``) so a worklist can categorize a page without re-deciding it.
     """
     # Expected variation set = union of (source, model) keys across the scope.
     expected_keys: set[tuple[str, str | None]] = set()
@@ -516,16 +519,21 @@ def _rollup(pages: list[dict]) -> dict:
     agreements: list[float] = []
     fidelities_by_model: dict[str, list[float]] = {}
     flagged: list[str] = []
+    flagged_details: list[dict] = []
     for p in pages:
         keys = {(v["source"], v["model"]) for v in p["transcriptions"]}
-        flag = bool(expected_keys - keys)  # missing an expected variation
+        # The flag reasons that fired for this page, so a worklist can say *why*
+        # without re-deciding it (the viewer never re-applies the thresholds).
+        reasons: set[str] = set()
+        if expected_keys - keys:  # missing an expected variation
+            reasons.add("missing")
         for v in p["transcriptions"]:
             label = v["model"] or v["source"]
             fid = v.get("fidelity")
             if fid is not None:
                 fidelities_by_model.setdefault(label, []).append(fid)
                 if fid < FIDELITY_FLAG_THRESHOLD:
-                    flag = True
+                    reasons.add("low_fidelity")
         # Mean agreement is over the *non-anchor* readings: every variation
         # except the page's anchor (the same anchor _annotate_divergence used).
         anchor_idx = _anchor_index(p["transcriptions"])
@@ -534,9 +542,10 @@ def _rollup(pages: list[dict]) -> dict:
                 continue
             agreements.append(v["agreement"])
             if v["agreement"] < AGREEMENT_FLAG_THRESHOLD:
-                flag = True
-        if flag:
+                reasons.add("divergent")
+        if reasons:
             flagged.append(p["id"])
+            flagged_details.append({"pageId": p["id"], "reasons": sorted(reasons)})
 
     mean_agreement = (
         round(sum(agreements) / len(agreements), AGREEMENT_PRECISION)
@@ -567,6 +576,7 @@ def _rollup(pages: list[dict]) -> dict:
         "fidelityByModel": fidelity_distribution,
         "flaggedPageCount": len(flagged),
         "flaggedPages": flagged,
+        "flaggedPageDetails": flagged_details,
     }
 
 

@@ -237,6 +237,34 @@ def test_missing_expected_variation_flags_page(tmp_path):
     # p2 is flagged purely on a missing expected variation; coverage drops below 1.
     assert case["coverage"]["fraction"] < 1.0
     assert case["flaggedPages"] == ["p2"]
+    # The worklist detail names the reason without re-deciding it.
+    assert case["flaggedPageDetails"] == [{"pageId": "p2", "reasons": ["missing"]}]
+
+
+def test_flagged_page_details_categorize_reasons(tmp_path):
+    con = _con(tmp_path)
+    _image(con, "img1")
+    # p1: clean — agrees with the anchor, healthy fidelity, full variation set.
+    _page(con, "p1", "img1")
+    _text(con, "p1", "pdf_text", None, "clean page text here", 1.0)
+    _text(con, "p1", "ai", "modelA", "clean page text here", 0.95)
+    # p2: the ai reading both diverges hard (low agreement) and self-reports low
+    #     fidelity, so both reasons fire and are reported sorted.
+    _page(con, "p2", "img1")
+    _text(con, "p2", "pdf_text", None, "alpha beta gamma delta epsilon", 1.0)
+    _text(con, "p2", "ai", "modelA", "totally different words entirely now", 0.5)
+    # p3: missing the modelA reading the others establish as expected.
+    _page(con, "p3", "img1")
+    _text(con, "p3", "pdf_text", None, "clean page text here", 1.0)
+
+    case = export.export_metrics(con)["case"]
+    con.close()
+    details = {d["pageId"]: d["reasons"] for d in case["flaggedPageDetails"]}
+    assert "p1" not in details
+    assert details["p2"] == ["divergent", "low_fidelity"]
+    assert details["p3"] == ["missing"]
+    # flaggedPageDetails covers exactly the flaggedPages set.
+    assert [d["pageId"] for d in case["flaggedPageDetails"]] == case["flaggedPages"]
 
 
 def test_metrics_scoped_to_one_image(tmp_path):
