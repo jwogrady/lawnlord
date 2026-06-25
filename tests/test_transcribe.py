@@ -191,6 +191,34 @@ def test_transcribe_page_sends_image_and_parses(tmp_path):
     assert out == {"text": "HELLO", "fidelity": 0.5, "model": main.TRANSCRIBE_MODEL}
 
 
+def test_transcribe_page_truncated_max_tokens_forces_fidelity_zero(tmp_path):
+    # A cloud response that ended on stop_reason='max_tokens' is truncated — its
+    # JSON never closes. transcribe_page must not raise; it salvages the partial
+    # text and forces fidelity to 0.0 (below FIDELITY_FLAG_THRESHOLD), mirroring
+    # the llama.cpp finish_reason=='length' guard.
+    case_dir = _exploded_case(tmp_path, pages=1)
+    png = next((case_dir / "extracted" / "pages").rglob("*.png"))
+    truncated = '{"transcription": "PARTIAL PAGE TEXT that got cut off mid'
+
+    class _TruncatedClient:
+        def __init__(self):
+            resp = SimpleNamespace(
+                content=[SimpleNamespace(type="text", text=truncated)],
+                stop_reason="max_tokens",
+            )
+
+            class _Messages:
+                def create(self, **kwargs):
+                    return resp
+
+            self.messages = _Messages()
+
+    out = main.transcribe_page(png, _TruncatedClient())
+    assert out["fidelity"] == 0.0
+    assert out["model"] == main.TRANSCRIBE_MODEL
+    assert "PARTIAL PAGE TEXT" in out["text"]  # salvaged, not discarded
+
+
 def test_cli_transcribe_is_opt_in(tmp_path, capsys, monkeypatch):
     # ADR-0006 default (--backend all): the exhaustive pass runs cloud-when-keyed
     # PLUS every installed local vision model. With NEITHER a key NOR any local

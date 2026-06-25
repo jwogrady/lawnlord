@@ -123,6 +123,16 @@ def transcribe_page(png_path: str | Path, client, model: str = DEFAULT_MODEL) ->
         output_config={"format": {"type": "json_schema", "schema": _OUTPUT_SCHEMA}},
     )
     text = next(b.text for b in resp.content if getattr(b, "type", None) == "text")
+    # A response that ended because it hit max_tokens is truncated: its JSON may
+    # not even close, so a bare json.loads would raise. Salvage any partial
+    # transcription text (mirroring the local tier) and force fidelity to 0.0 —
+    # same handling as the llama.cpp tier's finish_reason=='length' — so the
+    # incomplete reading still lands a row, but below FIDELITY_FLAG_THRESHOLD and
+    # into the flagged-page worklist rather than being silently trusted or dropped.
+    if getattr(resp, "stop_reason", None) == "max_tokens":
+        result = _parse_local_output(text, model)
+        result["fidelity"] = 0.0
+        return result
     data = json.loads(text)
     return {
         "text": data.get("transcription", ""),
