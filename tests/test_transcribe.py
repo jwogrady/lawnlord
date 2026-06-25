@@ -319,6 +319,59 @@ def test_local_transcriber_calls_ollama(tmp_path, monkeypatch):
     assert captured["body"]["messages"][0]["images"]        # the page image was attached
 
 
+def test_llamacpp_transcriber_calls_openai_endpoint(tmp_path, monkeypatch):
+    # LlamaCppTranscriber posts the page to the standalone server's OpenAI
+    # /v1/chat/completions with a json_schema response format, and parses the
+    # choices[0].message.content reply into {text, fidelity, model}.
+    import io
+    import urllib.request
+    import lawnlord.transcribe as tx
+
+    png = next((_exploded_case(tmp_path, pages=1) / "extracted" / "pages").rglob("*.png"))
+    captured = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["url"] = req.full_url
+        captured["body"] = json.loads(req.data)
+        reply = {"choices": [{"message": {"content": json.dumps(
+            {"transcription": "GPU OCR TEXT", "fidelity": 0.91})}}]}
+        return io.BytesIO(json.dumps(reply).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    out = tx.LlamaCppTranscriber(model="qwen2.5vl:7b").transcribe(png)
+    assert out == {"text": "GPU OCR TEXT", "fidelity": 0.91, "model": "qwen2.5vl:7b"}
+    assert captured["url"].endswith("/v1/chat/completions")
+    assert captured["body"]["response_format"]["type"] == "json_schema"
+    content = captured["body"]["messages"][0]["content"]   # OpenAI content array
+    assert any(p.get("type") == "image_url"
+               and p["image_url"]["url"].startswith("data:image/png;base64,")
+               for p in content)
+    # the runaway safeguards are wired into the request
+    assert captured["body"]["repeat_penalty"] == 1.1
+    assert captured["body"]["max_tokens"] == 3072
+
+
+def test_llamacpp_cap_hit_is_force_flagged(tmp_path, monkeypatch):
+    # A page that ends on finish_reason='length' (hit the token ceiling) is
+    # truncated/runaway; even if the model self-reports high fidelity, the
+    # transcriber forces fidelity to 0.0 so the flagged-page worklist catches it.
+    import io
+    import urllib.request
+    import lawnlord.transcribe as tx
+
+    png = next((_exploded_case(tmp_path, pages=1) / "extracted" / "pages").rglob("*.png"))
+
+    def fake_urlopen(req, timeout=None):
+        reply = {"choices": [{"finish_reason": "length", "message": {"content": json.dumps(
+            {"transcription": "truncated...", "fidelity": 0.97})}}]}
+        return io.BytesIO(json.dumps(reply).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    out = tx.LlamaCppTranscriber(model="qwen2.5vl:7b").transcribe(png)
+    assert out["fidelity"] == 0.0          # forced low so it gets flagged
+    assert out["text"] == "truncated..."   # but the partial text is kept, not dropped
+
+
 def test_ollama_available_detects_pulled_model(monkeypatch):
     import io
     import urllib.request

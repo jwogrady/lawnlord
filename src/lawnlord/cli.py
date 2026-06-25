@@ -33,6 +33,7 @@ from .transcribe import (
     DEFAULT_MODEL,
     DEFAULT_WORKERS,
     CloudTranscriber,
+    LlamaCppTranscriber,
     LocalTranscriber,
     escalate_case,
     installed_vision_models,
@@ -176,10 +177,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--case-dir", default=".", help="Case root holding lawnlord.duckdb (default: cwd)"
     )
     p_transcribe.add_argument(
-        "--backend", choices=("all", "cloud", "local"), default="all",
+        "--backend", choices=("all", "cloud", "local", "llamacpp"), default="all",
         help="Which vision tier(s) read each page: 'all' (the default — cloud "
         "Claude when ANTHROPIC_API_KEY is set, plus every installed Ollama vision "
-        "model; ADR-0006), 'cloud' (only Claude), or 'local' (only Ollama).",
+        "model; ADR-0006), 'cloud' (only Claude), 'local' (only Ollama), or "
+        "'llamacpp' (a standalone GPU-mmproj llama.cpp server — ~10x faster at "
+        "300 DPI; start it with scripts/llamacpp_server.sh).",
     )
     p_transcribe.add_argument(
         "--model", default=None,
@@ -191,6 +194,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Ollama server for --backend local (default: http://localhost:11434)",
     )
     p_transcribe.add_argument(
+        "--llamacpp-host", default=None,
+        help="llama.cpp server for --backend llamacpp (default: http://localhost:18082)",
+    )
+    p_transcribe.add_argument(
         "--force",
         action="store_true",
         help="Re-transcribe pages that already have text (append a new revision); "
@@ -199,6 +206,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_transcribe.add_argument(
         "--workers", type=int, default=DEFAULT_WORKERS,
         help=f"Concurrent vision-tier requests (default: {DEFAULT_WORKERS})",
+    )
+    p_transcribe.add_argument(
+        "--max-image-px", type=int, default=None, metavar="PX",
+        help="Local tier only: cap the page image's longest side to PX before "
+        "sending (downscale = faster CPU vision encode under Ollama). 0 sends the "
+        "native render. Omit to use each model's default (qwen: 1500). Use 0 for "
+        "high-fidelity retry passes on flagged pages.",
     )
     p_transcribe.add_argument(
         "--escalate-below", type=float, default=None, metavar="T",
@@ -232,7 +246,8 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _build_transcribers(backend: str, model: str | None, ollama_host: str | None):
+def _build_transcribers(backend: str, model: str | None, ollama_host: str | None,
+                        max_image_px: int | None = None, llamacpp_host: str | None = None):
     """The exhaustive set of vision backends for one transcribe pass (ADR-0006):
     every available model reads every page. A ``CloudTranscriber`` when
     ``ANTHROPIC_API_KEY`` is set, plus a ``LocalTranscriber`` per
@@ -245,11 +260,18 @@ def _build_transcribers(backend: str, model: str | None, ollama_host: str | None
     nothing is available."""
     has_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
 
+    # The llama.cpp tier is a single GPU-mmproj server; --model just names the
+    # DB row (the server already has one model loaded). --max-image-px applies.
+    if backend == "llamacpp":
+        return [LlamaCppTranscriber(model=model or DEFAULT_LOCAL_MODEL,
+                                    host=llamacpp_host, max_image_px=max_image_px)]
+
     # --model pins exactly one model on the chosen tier.
     if model is not None:
         if backend == "local":
             if ollama_available(model, ollama_host):
-                return [LocalTranscriber(model=model, host=ollama_host)]
+                return [LocalTranscriber(model=model, host=ollama_host,
+                                         max_image_px=max_image_px)]
             console.print(
                 f"[yellow]Local model '{model}' not pulled/reachable.[/] Skipped."
             )
@@ -265,7 +287,8 @@ def _build_transcribers(backend: str, model: str | None, ollama_host: str | None
     transcribers: list = []
     if backend != "cloud":
         for m in installed_vision_models(ollama_host):
-            transcribers.append(LocalTranscriber(model=m, host=ollama_host))
+            transcribers.append(LocalTranscriber(model=m, host=ollama_host,
+                                                 max_image_px=max_image_px))
     if backend != "local" and has_key:
         transcribers.append(CloudTranscriber(make_client(), model=DEFAULT_MODEL))
 
@@ -458,10 +481,12 @@ def _main(argv: list[str] | None = None) -> None:
 
     if args.command == "transcribe":
         case_dir = Path(args.case_dir).resolve()
-        transcribers = _build_transcribers(args.backend, args.model, args.ollama_host)
+        transcribers = _build_transcribers(args.backend, args.model, args.ollama_host,
+                                            args.max_image_px, args.llamacpp_host)
         if not transcribers:
             return
-        has_local = any(isinstance(t, LocalTranscriber) for t in transcribers)
+        has_local = any(isinstance(t, (LocalTranscriber, LlamaCppTranscriber))
+                        for t in transcribers)
         pages_dir = case_dir / "extracted" / "pages"
         con = open_case_db(case_dir / "lawnlord.duckdb")
         apply_schema(con)
