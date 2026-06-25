@@ -133,9 +133,45 @@ function esc(s: string): string {
 	);
 }
 
+// A visible, human-readable failure state in place of the perpetual "Loading…"
+// spinner. This is shown only when the case export could not be fetched/parsed —
+// it is distinct from a legitimately loaded-but-empty case (which still renders
+// the normal register), and `data` is never set from it, so it can never pass as
+// the record. The cause is left uncached: the user retries by reloading.
+function renderLoadError(detail: string): void {
+	app.innerHTML = `<section class="loaderror" role="alert">
+    <h2>Could not load the case</h2>
+    <p>The case export failed, so the record can't be shown. This is not an empty
+    case — the viewer never received it.</p>
+    <p class="muted">If the cause is transient (e.g. the case database is locked
+    by another process), reload to retry.</p>
+    <pre class="loaderror-detail">${esc(detail)}</pre>
+  </section>`;
+}
+
 async function load(): Promise<void> {
-	data = (await (await fetch("/api/case")).json()) as Payload;
-	render();
+	try {
+		const res = await fetch("/api/case");
+		// A non-200 (e.g. the route's structured 500) is a failure path — never
+		// parse the body as a Payload. Surface the server's error message if present.
+		if (!res.ok) {
+			let detail = `HTTP ${res.status}`;
+			try {
+				const body = (await res.json()) as { error?: string };
+				if (body && typeof body.error === "string") detail = body.error;
+			} catch {
+				/* non-JSON error body — keep the HTTP status as the detail */
+			}
+			renderLoadError(detail);
+			return;
+		}
+		data = (await res.json()) as Payload;
+		render();
+	} catch (err) {
+		// Fetch/parse/render threw (server unreachable, malformed JSON, a render
+		// bug): show the error state instead of leaving "Loading…" forever.
+		renderLoadError(String(err));
+	}
 }
 
 function renderHeader(): void {

@@ -647,3 +647,29 @@ iframe.snap {
 	background: var(--gold);
 	color: var(--ink);
 }
+
+/* Visible failure state when the case export can't be loaded (#150) — replaces
+   the perpetual "Loading…" so a failed/unreachable export is never mistaken for
+   an empty case. */
+.loaderror {
+	max-width: 48rem;
+	margin: 3rem auto;
+	padding: 1.5rem 1.75rem;
+	border: 1px solid var(--gold-deep);
+	border-radius: 6px;
+	background: var(--panel);
+}
+.loaderror h2 {
+	margin: 0 0 0.5rem;
+	color: var(--gold);
+}
+.loaderror-detail {
+	margin-top: 1rem;
+	padding: 0.75rem;
+	overflow-x: auto;
+	border-radius: 4px;
+	background: var(--ink);
+	color: var(--muted);
+	white-space: pre-wrap;
+	word-break: break-word;
+}

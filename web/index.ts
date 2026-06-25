@@ -70,23 +70,43 @@ const server = Bun.serve({
 		"/": index,
 		// The Actual-lens payload, straight from the DuckDB mirror via the CLI.
 		"/api/case": async () => {
-			const out = await Bun.$`uv run lawnlord export-actual --case-dir ${CASE_DIR}`
-				.cwd(REPO_ROOT)
-				.quiet()
-				.text();
-			return new Response(out, {
-				headers: { "content-type": "application/json" },
-			});
+			try {
+				const out = await Bun.$`uv run lawnlord export-actual --case-dir ${CASE_DIR}`
+					.cwd(REPO_ROOT)
+					.quiet()
+					.text();
+				return new Response(out, {
+					headers: { "content-type": "application/json" },
+				});
+			} catch (err) {
+				// A nonzero exit (locked DB, CLI/shell error) becomes a structured
+				// 500 the viewer surfaces as a visible error state, never an uncaught
+				// throw that hangs the page on "Loading…" (mirrors metrics/regions).
+				return new Response(JSON.stringify({ error: String(err) }), {
+					status: 500,
+					headers: { "content-type": "application/json" },
+				});
+			}
 		},
 		// The Exploded-lens payload: images → documents → pages + transcription.
 		"/api/exploded": async () => {
-			const out = await Bun.$`uv run lawnlord export-exploded --case-dir ${CASE_DIR}`
-				.cwd(REPO_ROOT)
-				.quiet()
-				.text();
-			return new Response(out, {
-				headers: { "content-type": "application/json" },
-			});
+			try {
+				const out = await Bun.$`uv run lawnlord export-exploded --case-dir ${CASE_DIR}`
+					.cwd(REPO_ROOT)
+					.quiet()
+					.text();
+				return new Response(out, {
+					headers: { "content-type": "application/json" },
+				});
+			} catch (err) {
+				// Same hardening as /api/case: a CLI/shell failure returns a
+				// structured 500 instead of throwing, so the Exploded lens shows an
+				// error rather than spinning forever.
+				return new Response(JSON.stringify({ error: String(err) }), {
+					status: 500,
+					headers: { "content-type": "application/json" },
+				});
+			}
 		},
 		// The divergence/confidence rollups (coverage, mean agreement, per-model
 		// fidelity, flagged-page worklist) at the case and image levels (#127). The
