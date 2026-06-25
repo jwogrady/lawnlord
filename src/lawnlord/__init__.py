@@ -27,7 +27,7 @@ from .export import (
     export_regions,
 )
 from .hashing import now_iso, sha256_bytes, sha256_file
-from .ingest import ingest_case
+from .ingest import ManifestHashMismatch, ingest_case
 from .intake import (
     CONFIG_FILENAME,
     DEFAULT_CORPUS_DIRNAME,
@@ -61,6 +61,7 @@ from .reader import (
     extract_zip,
     find_intake_dir,
     load_case_model,
+    manifest_declared_hashes,
     validate_data,
 )
 from .regions import (

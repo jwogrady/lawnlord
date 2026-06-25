@@ -361,9 +361,13 @@ def _main(argv: list[str] | None = None) -> None:
             extract_zip(source, intake_dir)
         case = Case.from_intake(intake_dir, case_dir=case_dir)
         con = open_case_db(case.duckdb_path)
-        apply_schema(con)
-        stats = ingest_case(con, case, captured_at(intake_dir))
-        con.close()
+        try:
+            apply_schema(con)
+            stats = ingest_case(con, case, captured_at(intake_dir))
+        finally:
+            # Close even when ingest aborts loud (e.g. a manifest hash mismatch)
+            # so the connection never leaks and the DB is reopenable.
+            con.close()
         table = Table(title="Imported case (zip → DuckDB mirror)")
         table.add_column("Metric")
         table.add_column("Value", justify="right")

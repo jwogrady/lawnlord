@@ -14,6 +14,14 @@ closed.
 
 ### Added
 
+- **Manifest sha256 verification on import** (#158). The intake manifest's per-file `sha256` is now
+  a verified contract, not just recorded metadata. On import each filed PDF the manifest declares is
+  hashed afresh and compared to its declared hash; a mismatch (tampered/truncated bytes) or a
+  manifest-declared file missing on disk raises a clear, identifying `ManifestHashMismatch` (naming
+  the file and both hashes) and aborts the case's ingest **before** any row is inserted — consistent
+  with the codebase's existing fail-loud posture. Manifest-less intakes, or manifests without per-file
+  hashes, skip verification (matching the `capturedAt` fallback philosophy); when every declared hash
+  matches, ingest output is byte-identical to before.
 - **Confidence gauges for the transcription corpus** (#127; ADR-0007/0008). The Exploded lens now
   opens with an at-a-glance confidence read at both the **case** and **image** levels: coverage
   (the fraction of expected `page × variation` cells present), cross-model agreement, a per-model
