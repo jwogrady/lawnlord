@@ -520,7 +520,9 @@ async function wireFocusPage(page: ExPage): Promise<void> {
 	if (regions === undefined) {
 		// Only a successful read is cached; a transient failure (a 500 or a
 		// network error) is left uncached so the next focus on this page retries
-		// rather than being stuck text-only for the session.
+		// rather than being stuck text-only for the session. A 200 with an empty
+		// array is a success (regions were never captured for this corpus) and IS
+		// cached — distinct from the retryable error path, which returns here.
 		try {
 			const res = await fetch(`/api/regions?page=${encodeURIComponent(page.id)}`);
 			if (!res.ok) return;
@@ -534,7 +536,19 @@ async function wireFocusPage(page: ExPage): Promise<void> {
 	// The fetch may have resolved after the user navigated away: only mount if
 	// this page is still the focused one and its wrapper is still in the live DOM.
 	if (exPageId !== page.id || !wrap.isConnected) return;
-	if (!regions.length) return; // graceful text-only fallback
+	if (!regions.length) {
+		// The export succeeded but carried no geometry for this page — regions were
+		// never captured for this corpus (no `lawnlord regions` run). Surface a
+		// clear, non-alarming inline signal beside the image instead of a blank
+		// overlay. Read-only: derived solely from the (empty) export payload; the
+		// viewer never infers boxes. Run `lawnlord regions` and the same page then
+		// renders boxes. The error path above never reaches here (it returns).
+		const note = document.createElement("div");
+		note.className = "region-empty";
+		note.textContent = "Regions not captured for this corpus — run lawnlord regions to locate words on the page.";
+		wrap.appendChild(note);
+		return;
+	}
 	const overlay = mountRegionOverlay(wrap, regions);
 
 	// Record tokens indexed by ordinal for O(1) lookup (mirrors the box map).
