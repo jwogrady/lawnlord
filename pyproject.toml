@@ -62,6 +62,12 @@ packages = ["src/lawnlord"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+# Slow/optional acceptance tests are excluded from the default fast run; opt in
+# with `pytest -m slow` (they round-trip the real 17 MB court-export fixture).
+addopts = "-m 'not slow'"
+markers = [
+    "slow: real-fixture acceptance tests excluded from the default fast run (run with `pytest -m slow`)",
+]
 
 [tool.ruff]
 line-length = 99
