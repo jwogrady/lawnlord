@@ -135,6 +135,95 @@ def transcribe_page(png_path: str | Path, client, model: str = DEFAULT_MODEL) ->
 # No per-page cost, no rate limit, no data leaving the machine.
 DEFAULT_LOCAL_MODEL = "qwen2.5vl:7b"
 DEFAULT_OLLAMA_HOST = "http://localhost:11434"
+# Standalone llama.cpp server (scripts/llamacpp_server.sh) with the vision
+# projector ON the GPU — ~10x faster prefill than Ollama's CPU mmproj, so the
+# native 300-DPI render is fast. OpenAI-compatible API. See memory:
+# ollama-vision-cpu-bottleneck.
+DEFAULT_LLAMACPP_HOST = "http://localhost:18082"
+# Ollama defaults a model's context to 4096 tokens. A high-DPI page render
+# tokenizes to more than that on its own (a 300-DPI page is ~4100 vision tokens
+# for qwen2.5-vl), so without an explicit window every such page 400s with
+# "exceeds the available context size" and the whole local tier silently fails.
+# 8192 fits a 300-DPI page with headroom; override per backend if needed.
+DEFAULT_NUM_CTX = 8192
+
+# Per-local-model tuning, keyed by name prefix so tag variants (``:latest``,
+# ``:7b``) match. Vision encoders differ wildly on the SAME page render, so a
+# single setting can't serve all of them:
+#   * num_ctx     — token window (Ollama defaults to 4096; high-DPI pages overflow it).
+#   * max_image_px — longest side to downscale the page to before sending. granite's
+#                    encoder turns a 300-DPI page into ~73k tokens, so its input must
+#                    be capped; qwen reads the native render fine (best fidelity).
+#   * num_predict — cap on generated tokens. minicpm-v ignores the JSON stop and
+#                    rambles to the context limit, so bound it and salvage the text.
+_DEFAULT_TUNING = {"num_ctx": DEFAULT_NUM_CTX, "max_image_px": None, "num_predict": -1}
+_LOCAL_TUNING = {
+    # Ollama runs the vision projector on CPU (--no-mmproj-offload), so per-page
+    # cost is the CPU image-encode and scales ~linearly with image tokens. A
+    # 300-DPI page (~4100 tokens) is ~64 s; 1500 px (~1800 tokens) is ~24 s with
+    # identical printed text (only faint stamps differ). So qwen reads at 1500 px
+    # by default — reserve native 300 DPI for retry/exception pages via
+    # --max-image-px 0. See memory: ollama-vision-cpu-bottleneck.
+    "qwen2.5vl":         {"num_ctx": 8192,  "max_image_px": 1500, "num_predict": -1},
+    "granite3.2-vision": {"num_ctx": 16384, "max_image_px": 1024, "num_predict": -1},
+    "minicpm-v":         {"num_ctx": 8192,  "max_image_px": None, "num_predict": 2048},
+}
+
+
+def _tuning_for(model: str) -> dict:
+    for prefix, tuning in _LOCAL_TUNING.items():
+        if model.startswith(prefix):
+            return tuning
+    return _DEFAULT_TUNING
+
+
+def _b64_png_scaled(path: str | Path, max_px: int | None) -> str:
+    """Base64 PNG, downscaled so the longest side is at most ``max_px`` (keeping
+    aspect). ``None`` or an already-small image sends the native render."""
+    if not max_px:
+        return _b64_png(path)
+    from io import BytesIO
+
+    from PIL import Image
+
+    im = Image.open(path)
+    longest = max(im.size)
+    if longest <= max_px:
+        return _b64_png(path)
+    scale = max_px / longest
+    im = im.resize((round(im.width * scale), round(im.height * scale)))
+    buf = BytesIO()
+    im.save(buf, format="PNG")
+    return base64.standard_b64encode(buf.getvalue()).decode("utf-8")
+
+
+def _parse_local_output(content: str, model: str) -> dict:
+    """Turn an Ollama message body into ``{text, fidelity, model}``. The happy
+    path is the structured JSON the schema requests; when a model emits invalid
+    or truncated JSON (e.g. minicpm-v running past its stop), salvage the
+    transcription text and flag it with ``fidelity=0.0`` so the divergence
+    metrics treat it as the low-confidence reading it is."""
+    try:
+        data = json.loads(content)
+        return {
+            "text": data.get("transcription", ""),
+            "fidelity": float(data.get("fidelity", 0.0)),
+            "model": model,
+        }
+    except (json.JSONDecodeError, ValueError, TypeError):
+        import re
+
+        m = re.search(r'"transcription"\s*:\s*"', content)
+        if not m:
+            return {"text": content.strip(), "fidelity": 0.0, "model": model}
+        tail = content[m.end():]
+        cut = re.search(r'"\s*,\s*"fidelity"', tail)  # closed string → cut at it
+        tail = tail[: cut.start()] if cut else tail.rstrip().rstrip("}").rstrip().rstrip('"')
+        try:  # decode JSON string escapes (\n, \", …) best-effort
+            text = json.loads('"' + tail + '"')
+        except json.JSONDecodeError:
+            text = tail.replace('\\n', '\n').replace('\\"', '"')
+        return {"text": text, "fidelity": 0.0, "model": model}
 
 
 class Transcriber(Protocol):
@@ -165,21 +254,32 @@ class LocalTranscriber:
     the page never leaves the machine. Talks to Ollama's HTTP API via the stdlib
     (no new dependency); a failure here propagates so the caller can record it."""
 
-    def __init__(self, model: str = DEFAULT_LOCAL_MODEL, host: str | None = None):
+    def __init__(self, model: str = DEFAULT_LOCAL_MODEL, host: str | None = None,
+                 max_image_px: int | None = None):
         self.model = model
         self._host = (host or DEFAULT_OLLAMA_HOST).rstrip("/")
+        self._tuning = dict(_tuning_for(model))
+        # An explicit --max-image-px overrides the per-model default: a positive
+        # value caps the longest side, 0 means send the native render (300 DPI).
+        if max_image_px is not None:
+            self._tuning["max_image_px"] = max_image_px or None
 
     def transcribe(self, png_path: str | Path) -> dict:
         import urllib.request
 
+        t = self._tuning
+        options = {"temperature": 0, "num_ctx": t["num_ctx"]}
+        if t["num_predict"] and t["num_predict"] > 0:
+            options["num_predict"] = t["num_predict"]
         payload = json.dumps({
             "model": self.model,
             "messages": [
-                {"role": "user", "content": _PROMPT, "images": [_b64_png(png_path)]}
+                {"role": "user", "content": _PROMPT,
+                 "images": [_b64_png_scaled(png_path, t["max_image_px"])]}
             ],
             "stream": False,
             "format": _OUTPUT_SCHEMA,
-            "options": {"temperature": 0},
+            "options": options,
         }).encode("utf-8")
         req = urllib.request.Request(
             f"{self._host}/api/chat", data=payload,
@@ -187,12 +287,68 @@ class LocalTranscriber:
         )
         with urllib.request.urlopen(req, timeout=600) as resp:
             body = json.loads(resp.read())
-        data = json.loads(body["message"]["content"])
-        return {
-            "text": data.get("transcription", ""),
-            "fidelity": float(data.get("fidelity", 0.0)),
+        return _parse_local_output(body["message"]["content"], self.model)
+
+
+class LlamaCppTranscriber:
+    """Vision tier backed by a standalone llama.cpp server with the multimodal
+    projector ON the GPU (unlike Ollama's ``--no-mmproj-offload``, which strands
+    the vision encode on the CPU). Talks to the OpenAI-compatible
+    ``/v1/chat/completions`` endpoint with a ``json_schema`` response format, so
+    it keeps the same ``{text, fidelity, model}`` contract as the others.
+
+    ~10x faster prefill than the Ollama tier, fast enough that the native
+    300-DPI render needs no downscale. Start the server with
+    ``scripts/llamacpp_server.sh``."""
+
+    def __init__(self, model: str = DEFAULT_LOCAL_MODEL, host: str | None = None,
+                 max_image_px: int | None = None):
+        self.model = model
+        self._host = (host or DEFAULT_LLAMACPP_HOST).rstrip("/")
+        # GPU vision is fast — default to the native render; --max-image-px (a
+        # positive value) still downscales, 0 is treated as native.
+        self._max_image_px = max_image_px or None
+
+    def transcribe(self, png_path: str | Path) -> dict:
+        import urllib.request
+
+        data_uri = "data:image/png;base64," + _b64_png_scaled(png_path, self._max_image_px)
+        payload = json.dumps({
             "model": self.model,
-        }
+            "messages": [{"role": "user", "content": [
+                {"type": "text", "text": _PROMPT},
+                {"type": "image_url", "image_url": {"url": data_uri}},
+            ]}],
+            "temperature": 0,
+            # Court caption pages have a tall column of "§" dividers; at temp 0
+            # the model can fall into a degenerate loop emitting "§" until the
+            # token ceiling (finish_reason=length, JSON never closes -> fidelity
+            # 0). A mild repeat penalty breaks the loop with no quality cost
+            # (verified: fidelity 0.0 -> 0.98). max_tokens is a backstop — a dense
+            # legit page is ~1200 tokens, so 3072 never truncates real content.
+            "max_tokens": 3072,
+            "repeat_penalty": 1.1,
+            "repeat_last_n": 64,
+            "response_format": {"type": "json_schema", "json_schema": {
+                "name": "page", "schema": _OUTPUT_SCHEMA, "strict": True}},
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            f"{self._host}/v1/chat/completions", data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=600) as resp:
+            body = json.loads(resp.read())
+        choice = body["choices"][0]
+        result = _parse_local_output(choice["message"]["content"], self.model)
+        # Safeguard: a page that ended because it hit the token ceiling
+        # (finish_reason='length') is truncated/runaway. The model may still
+        # self-report high fidelity on text it didn't finish, so force it to 0.0
+        # — that drops it below FIDELITY_FLAG_THRESHOLD and into the flagged-page
+        # worklist (export-metrics), making the exception visible for review or a
+        # higher-budget retry instead of silently trusting incomplete output.
+        if choice.get("finish_reason") == "length":
+            result["fidelity"] = 0.0
+        return result
 
 
 def _ollama_tags(host: str | None = None) -> list[dict] | None:

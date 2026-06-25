@@ -34,6 +34,7 @@ lawnlord.toml
 # Generated case artifacts when a command is run from the repo root (the derived,
 # regenerable index + outputs). Case data and its derivatives never live here.
 lawnlord.duckdb
+lawnlord.duckdb.*
 compare/
 artifacts/
 knowledgebase/
