@@ -14,6 +14,7 @@ import { join } from "node:path";
 
 import index from "./index.html";
 import { handleDownload, type DownloadConfig } from "./download";
+import { safeJoin, pngRoot } from "./paths";
 
 const CASE_DIR = process.env.CASE_DIR ?? ".";
 const REPO_ROOT = join(import.meta.dir, "..");
@@ -52,12 +53,13 @@ const DOWNLOAD_CONFIG: DownloadConfig = {
 	repoRoot: REPO_ROOT,
 };
 
-// Serve a file from the intake dir under a fixed subdir, blocking path escapes.
+// Serve a file from the intake dir under a fixed subdir, confining the path to
+// INTAKE_DIR/<sub> via the shared safeJoin (rejects `..`, absolute components,
+// null bytes, and symlinks pointing out — #145).
 function serveFromIntake(sub: string, rest: string): Response {
-	const decoded = decodeURIComponent(rest);
-	if (decoded.includes("..")) return new Response("Forbidden", { status: 403 });
-	const file = Bun.file(join(INTAKE_DIR, sub, decoded));
-	return new Response(file);
+	const abs = safeJoin(join(INTAKE_DIR, sub), decodeURIComponent(rest));
+	if (!abs) return new Response("Forbidden", { status: 403 });
+	return new Response(Bun.file(abs));
 }
 
 const server = Bun.serve({
@@ -146,8 +148,9 @@ const server = Bun.serve({
 		// Exploded-layer page PNGs (rendered by `lawnlord explode`).
 		if (url.pathname.startsWith("/png/")) {
 			const rest = decodeURIComponent(url.pathname.slice("/png/".length));
-			if (rest.includes("..")) return new Response("Forbidden", { status: 403 });
-			return new Response(Bun.file(join(CASE_DIR, "extracted", "pages", rest)));
+			const abs = safeJoin(pngRoot(CASE_DIR), rest);
+			if (!abs) return new Response("Forbidden", { status: 403 });
+			return new Response(Bun.file(abs));
 		}
 		return new Response("Not found", { status: 404 });
 	},
