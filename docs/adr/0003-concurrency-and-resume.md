@@ -37,6 +37,16 @@ non-deterministic by nature — see ADR-0001).
   **writing serially in page order** on one connection.
 - **Invariants preserved:** append-only `page_text`; stable insert ordering;
   `generated_at` stamping; mirror never written.
+- **Single writer per case (cross-process):** the concurrency above is *within*
+  one run (threads sharing one connection). *Across* processes, DuckDB allows at
+  most one read-write process per case file and refuses a read-only open while a
+  writer holds the lock — so the viewer / query commands cannot read a case
+  during an active `import`/`explode`/`transcribe`/`regions` run. `db.open_case_db`
+  (the single open site) detects this lock contention and raises a friendly
+  `CaseDatabaseBusy` (naming the case path and likely cause), distinct from a
+  missing/corrupt file, and the CLI exits non-zero. Operators run a case's write
+  commands serially and view it only after they finish. See
+  [docs/architecture.md](../architecture.md) and [docs/schema.md](../schema.md).
 
 ## Alternatives considered
 

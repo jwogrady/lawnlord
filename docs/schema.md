@@ -75,6 +75,12 @@ tables, in three layers (read `db.py` for exact columns):
 Per-case DBs are regenerable, so a `SCHEMA_VERSION` bump needs no in-place migration — `apply_schema`
 refuses a stamped-version mismatch and the fix is always to re-import.
 
+DuckDB enforces **a single read-write process per case file**, and refuses a read-only open too while a
+writer holds the lock — so a case cannot be viewed or queried *during* an active write (ADR-0003). All
+opens go through `db.open_case_db`, which surfaces lock contention as a clear `CaseDatabaseBusy` error
+(naming the case path) rather than a raw DuckDB `IOException`. Run a case's write commands
+(`import`/`explode`/`transcribe`/`regions`) serially and read it only once they finish.
+
 ## Additive-only invariant
 
 The mirrored record — the zip and its provenance (sha256s, paths, page counts) — is immutable.

@@ -217,6 +217,26 @@ _SCHEMA_STATEMENTS = (
 )
 
 
+class CaseDatabaseBusy(RuntimeError):
+    """Another OS process holds DuckDB's single-writer lock on the case file.
+
+    DuckDB allows at most one read-write process per database file, and a read
+    *or* write open is refused while a writer holds the lock (see ADR-0003 and
+    docs/architecture.md). This is *contention*, not a missing/corrupt file: the
+    fix is to let the other lawnlord run finish, not to regenerate the DB."""
+
+
+# DuckDB's file-lock IOException carries this phrase; matching it lets us turn
+# the raw cross-process lock error into a friendly, actionable message while
+# letting a genuinely missing/corrupt-file IOException surface unchanged.
+_LOCK_MARKERS = ("Could not set lock on file", "Conflicting lock is held")
+
+
+def _is_lock_contention(exc: Exception) -> bool:
+    message = str(exc)
+    return any(marker in message for marker in _LOCK_MARKERS)
+
+
 def open_case_db(
     path: str | Path, read_only: bool = False
 ) -> duckdb.DuckDBPyConnection:
@@ -224,14 +244,33 @@ def open_case_db(
 
     Read-write by default (creating the file and parent dirs if needed);
     pass ``read_only=True`` for queries, which requires an existing database.
-    """
+
+    DuckDB enforces a single read-write process per case file, and refuses a
+    read-only open too while a writer holds the lock. When that happens we raise
+    :class:`CaseDatabaseBusy` with the case path and likely cause, instead of
+    leaking DuckDB's raw ``IOException`` / traceback. A genuinely missing or
+    corrupt file still surfaces as its original error (it is not contention)."""
     path = Path(path)
-    if read_only:
-        if not path.exists():
-            raise FileNotFoundError(f"case database not found: {path}")
-        return duckdb.connect(str(path), read_only=True)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return duckdb.connect(str(path))
+    try:
+        if read_only:
+            if not path.exists():
+                raise FileNotFoundError(f"case database not found: {path}")
+            return duckdb.connect(str(path), read_only=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return duckdb.connect(str(path))
+    except duckdb.IOException as exc:
+        if not _is_lock_contention(exc):
+            raise
+        mode = "read" if read_only else "write"
+        raise CaseDatabaseBusy(
+            f"case database is busy: {path}\n"
+            f"  Another lawnlord process is writing this case, and DuckDB allows "
+            f"only one read-write process per case file (a {mode} open is refused "
+            f"while a writer holds the lock).\n"
+            f"  Wait for the other run (import/explode/transcribe/regions) to "
+            f"finish, then retry. The file is not corrupt — this is lock "
+            f"contention, not a missing database."
+        ) from exc
 
 
 class SchemaVersionMismatch(RuntimeError):

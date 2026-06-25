@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 from .console import console
-from .db import apply_schema, open_case_db
+from .db import CaseDatabaseBusy, apply_schema, open_case_db
 from .explode import explode_case
 from .export import export_actual, export_exploded, export_metrics, export_regions
 from .ingest import ingest_case
@@ -619,6 +619,11 @@ def main(argv: list[str] | None = None) -> None:
     _load_dotenv()
     try:
         _main(argv)
+    except CaseDatabaseBusy as exc:
+        # Lock contention: exit non-zero with the friendly message so a blocked
+        # run is never mistaken for a completed one.
+        console.print(f"[red]Database busy:[/] {exc}")
+        raise SystemExit(1) from None
     except (FileNotFoundError, ValueError) as exc:
         console.print(f"[red]Error:[/] {exc}")
         raise SystemExit(1) from None

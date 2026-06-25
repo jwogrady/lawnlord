@@ -75,6 +75,14 @@ intake zip (rake: schema.json + data.json + manifest.json + files/ + pages/)
   extraction root (used by `reader.extract_zip`); the viewer's `paths.safeJoin` confines served files.
 - **Manifest verification** — `ingest` re-hashes each filed PDF and checks it against `manifest.json`,
   failing loud on a mismatch.
+- **Single writer per case** — DuckDB allows at most one read-write process per case file at a time, and
+  refuses a read-only open too while a writer holds the lock (so the viewer/query commands cannot read a
+  case *during* an active `import`/`explode`/`transcribe`/`regions` run — see
+  [ADR-0003](adr/0003-concurrency-and-resume.md)). All paths open through `db.open_case_db`, the single
+  SQL open site, which turns DuckDB's raw lock `IOException` into a clear `CaseDatabaseBusy` error naming
+  the case path and likely cause (another lawnlord process is writing it), distinct from a
+  missing/corrupt file, and exits non-zero so a blocked run is never mistaken for a completed one. Run a
+  case's write commands serially, and view/query it only after the write finishes.
 
 ## Not built yet (see the ROADMAP)
 

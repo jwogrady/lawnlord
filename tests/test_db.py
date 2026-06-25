@@ -1,5 +1,9 @@
 """DuckDB schema: creation and idempotency."""
 
+import subprocess
+import sys
+import textwrap
+
 import pytest
 
 import lawnlord as main
@@ -66,3 +70,57 @@ def test_open_case_db_creates_parent_dirs(tmp_path):
     con = main.open_case_db(db_path)
     main.apply_schema(con)
     assert db_path.exists()
+
+
+def _hold_writer(db_path):
+    """Spawn a child process that opens a read-write connection and blocks,
+    holding DuckDB's single-writer file lock. DuckDB's lock is cross-*process*
+    (a second connection in the same process is just reused), so contention can
+    only be exercised from a separate OS process."""
+    child = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            textwrap.dedent(f"""
+                import duckdb, sys, time
+                con = duckdb.connect({str(db_path)!r})
+                print("HELD", flush=True)
+                time.sleep(30)
+            """),
+        ],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    # Block until the child confirms it holds the lock.
+    line = child.stdout.readline().strip()
+    assert line == "HELD", f"writer child failed to start: {line!r}"
+    return child
+
+
+@pytest.mark.parametrize("read_only", [False, True])
+def test_open_case_db_reports_lock_contention(tmp_path, read_only):
+    """A second open of a case file held by another writer must raise the
+    friendly CaseDatabaseBusy (write *and* read-only), not a raw DuckDB
+    IOException — DuckDB refuses both while a writer holds the lock."""
+    db_path = tmp_path / "lawnlord.duckdb"
+    # Create the file first so a read-only open gets past the existence check
+    # and actually reaches the lock.
+    main.open_case_db(db_path).close()
+
+    writer = _hold_writer(db_path)
+    try:
+        with pytest.raises(main.CaseDatabaseBusy) as excinfo:
+            main.open_case_db(db_path, read_only=read_only)
+        message = str(excinfo.value)
+        assert str(db_path) in message
+        assert "another lawnlord process is writing" in message.lower()
+    finally:
+        writer.terminate()
+        writer.wait(timeout=10)
+
+
+def test_open_case_db_missing_is_not_busy(tmp_path):
+    """A genuinely missing read-only DB is a FileNotFoundError, distinct from
+    lock contention — the busy path must not mask a missing/corrupt file."""
+    with pytest.raises(FileNotFoundError):
+        main.open_case_db(tmp_path / "absent.duckdb", read_only=True)
