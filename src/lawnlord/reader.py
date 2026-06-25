@@ -192,6 +192,7 @@ def _parse_documents(raw: list | None) -> tuple[DocumentRef, ...]:
             declared_page_count=_page_count(d.get("Page Count")),
             docket_event=d.get("event", ""),
             filing_date=d.get("date", ""),
+            source_url=d.get("url", "") or "",
         )
     return tuple(by_path[p] for p in sorted(by_path))
 

@@ -51,7 +51,8 @@ The zip reader (next branch) populates this; `ingest.py` consumes it.
 - **`parties[]`** (`Party`) — `role`, `name`, `representation`, `location`, `attorneys[]`, `aliases`.
 - **`events[]`** (`Event`) — `date`, `phase`, `event`, `description`, `party`, `files[]`.
 - **`documents[]`** (`DocumentRef`) — `intake_path` (`files/doc-N.pdf`), `filename`, `title`,
-  `declared_page_count`, `docket_event`, `filing_date`.
+  `declared_page_count`, `docket_event`, `filing_date`, `source_url` (the per-file portal `url`,
+  empty when absent — never fabricated; persisted to `images.source_url`).
 - **`financials`** (`Financials`, nullable) and `hearings` / `docket` / `case_flags` /
   `case_cross_references` / `source_note` carry the remaining structure.
 

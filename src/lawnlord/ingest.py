@@ -218,13 +218,13 @@ def ingest_case(con: duckdb.DuckDBPyConnection, case: Case, generated_at: str) -
             INSERT INTO images (id, case_id, filename, title, intake_path,
                                 docket_type, filing_date, declared_page_count,
                                 actual_page_count, page_count_mismatch,
-                                sha256_hash, needs_review, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, NULL, ?)
+                                sha256_hash, needs_review, source_url, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, NULL, ?, ?)
             """,
             [
                 image_id, case_id, doc.filename, doc.title, doc.intake_path,
                 doc.docket_event, doc.filing_date, doc.declared_page_count,
-                sha, generated_at,
+                sha, doc.source_url or None, generated_at,
             ],
         )
 

@@ -137,6 +137,7 @@ class DocumentRef:
     declared_page_count: int | None = None
     docket_event: str = ""  # data.json "event"
     filing_date: str = ""  # data.json "date"
+    source_url: str = ""  # data.json per-document "url"; "" when absent
 
 
 @dataclass(frozen=True)

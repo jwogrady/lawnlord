@@ -124,6 +124,45 @@ def test_load_case_model_maps_data(tmp_path):
     assert len(model.financials.transactions) == 1
 
 
+def test_parse_documents_reads_per_document_url(tmp_path):
+    case = json.loads(json.dumps(_GOOD_CASE))
+    case["documents"][0]["url"] = "https://portal.example/img/doc-1"
+    model = main.load_case_model(_make_intake(tmp_path, case=case))
+    assert model.documents[0].source_url == "https://portal.example/img/doc-1"
+
+
+def test_parse_documents_url_absent_stays_empty(tmp_path):
+    # _GOOD_CASE's document declares no url; it must never be fabricated.
+    model = main.load_case_model(_make_intake(tmp_path))
+    assert model.documents[0].source_url == ""
+
+
+def test_import_persists_image_source_url(tmp_path):
+    case = json.loads(json.dumps(_GOOD_CASE))
+    case["documents"][0]["url"] = "https://portal.example/img/doc-1"
+    intake = _make_intake(tmp_path, case=case)
+    case_dir = tmp_path / "out"
+    main.main(["import", str(intake), "--case-dir", str(case_dir)])
+    con = main.open_case_db(case_dir / "lawnlord.duckdb", read_only=True)
+    try:
+        url = con.execute("SELECT source_url FROM images").fetchone()[0]
+    finally:
+        con.close()
+    assert url == "https://portal.example/img/doc-1"
+
+
+def test_import_image_source_url_null_when_absent(tmp_path):
+    intake = _make_intake(tmp_path)
+    case_dir = tmp_path / "out"
+    main.main(["import", str(intake), "--case-dir", str(case_dir)])
+    con = main.open_case_db(case_dir / "lawnlord.duckdb", read_only=True)
+    try:
+        url = con.execute("SELECT source_url FROM images").fetchone()[0]
+    finally:
+        con.close()
+    assert url is None  # absent → NULL, never a placeholder
+
+
 # --- DuckDB import --------------------------------------------------------
 
 

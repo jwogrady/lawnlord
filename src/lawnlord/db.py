@@ -45,7 +45,12 @@ import duckdb
 # row's stable id (`anchor_kind`/`anchor_id`: a `page_text` variation today, an
 # analysis entity later). Populated from PDF geometry for born-digital pages;
 # never fabricated. Additive: references pages/page_text, never mutates them.
-SCHEMA_VERSION = 11
+# v12 (#155): `images.source_url` — the per-file portal URL the intake manifest
+# recorded for each filed PDF (data.json document `url`), so the Actual export
+# can report where each image came from. NULL/"" when the intake declares no URL;
+# never fabricated. The case-level provenance (`cases.source_url`/`last_refreshed`)
+# already existed; this extends it to the leaf. Regenerable: re-run the import.
+SCHEMA_VERSION = 12
 
 # One statement per table; CREATE ... IF NOT EXISTS keeps apply_schema idempotent.
 _SCHEMA_STATEMENTS = (
@@ -129,6 +134,7 @@ _SCHEMA_STATEMENTS = (
         page_count_mismatch BOOLEAN,
         sha256_hash TEXT NOT NULL,
         needs_review BOOLEAN,
+        source_url TEXT,
         created_at TEXT
     )
     """,
