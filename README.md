@@ -5,7 +5,7 @@
 *Mirror a court case from its deterministic export, then build the views you need to read it and fight it — verifiable, and traceable to the source.*
 
 ![python](https://img.shields.io/badge/python-3.13%2B-blue)
-![tests](https://img.shields.io/badge/tests-27%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-115%20passing-brightgreen)
 ![status](https://img.shields.io/badge/status-alpha%20rebuild-orange)
 ![license](https://img.shields.io/badge/license-proprietary-red)
 
@@ -54,10 +54,22 @@ A stripped, importable foundation (the zip-view "studs"):
 
 ## Install
 
+lawnlord is **proprietary and unpublished** (see [License](#license)) — there is no package on PyPI,
+so install it locally from a clone:
+
 ```bash
-uv add lawnlord                      # as a project dependency
-# or, for local development from a sibling checkout:
-#   [tool.uv.sources] lawnlord = { path = "../lawnlord", editable = true }
+git clone https://github.com/jwogrady/lawnlord.git
+cd lawnlord
+uv sync                              # create the env from the lockfile
+# the `lawnlord` console script is now available via `uv run lawnlord …`
+```
+
+To depend on it for local development from a **sibling checkout**, add an editable source entry to
+your project's `pyproject.toml`:
+
+```toml
+[tool.uv.sources]
+lawnlord = { path = "../lawnlord", editable = true }
 ```
 
 ## Usage
@@ -69,6 +81,43 @@ lawnlord start [root]    # scaffold intake/ + lawnlord.toml + an intake README
 The intake location is configurable so case data can live in a **separate repo** or **local in the
 project**, resolved in this order: the `LAWNLORD_INTAKE` env var → `lawnlord.toml`'s `[lawnlord]
 intake` → `./intake`. `python -m lawnlord …` works as an alternative to the console script.
+
+### Runbook: import → explode → transcribe → regions → view
+
+The full sequence from a rake intake zip to the running viewer. Each command resolves the case from
+`--case-dir` (default: the current directory), which holds the generated `lawnlord.duckdb`.
+
+```bash
+# 1. import — extract+verify the zip and build the DuckDB mirror (the immutable record)
+lawnlord import <case>.zip --case-dir ./mycase
+
+# 2. explode — render each filed PDF into per-page PNGs (the Exploded layer)
+lawnlord explode --case-dir ./mycase [--dpi 150]
+
+# 3. transcribe — read each page with the vision backend(s); appends derived text, never overwrites the mirror
+lawnlord transcribe --case-dir ./mycase [--backend all|cloud|local|llamacpp]
+
+# 4. regions — capture spatial-anchor boxes per text span from PDF geometry (born-digital pages; deterministic)
+lawnlord regions --case-dir ./mycase
+
+# 5. view — launch the separate Bun viewer (NOT a lawnlord subcommand)
+cd web && CASE_DIR=../mycase bun index.ts      # serves on http://localhost:4173 (override with PORT)
+```
+
+**Backend prerequisites for step 3** (`--backend`, default `all`):
+
+- `cloud` — Claude vision; needs `ANTHROPIC_API_KEY` (a local `.env` is auto-loaded).
+- `local` — every installed Ollama vision model; needs a reachable Ollama (`--ollama-host`, default
+  `http://localhost:11434`).
+- `llamacpp` — a standalone GPU-mmproj llama.cpp server (~10x faster at 300 DPI); start it with
+  `scripts/llamacpp_server.sh` (`--llamacpp-host`, default `http://localhost:18082`).
+- `all` (the default) runs cloud (when the key is set) plus every installed local model.
+
+**How the viewer is fed.** The Bun app shells out to lawnlord's JSON exporters: the **Actual** lens
+comes from `lawnlord export-actual` (case header + parties + register of actions), the **Exploded**
+lens from `lawnlord export-exploded` (images → documents → pages + every transcription variation),
+the on-image highlights from `lawnlord export-regions --page <id>`, and the confidence rollups from
+`lawnlord export-metrics`. You can run any of these directly to inspect the JSON the viewer reads.
 
 ### Intake layout
 
@@ -102,7 +151,8 @@ pages/         the captured portal HTML (CaseDetail.html, CaseDocuments.html)
 ## Development
 
 ```bash
-uv run pytest                        # characterization suite (27 tests)
+uv run pytest                        # characterization suite (115 tests)
+uv run pytest --collect-only -q      # recount: the last line is the authoritative test count
 ```
 
 The tests are **characterization tests**: they pin current behavior, so a failing test is a behavior
