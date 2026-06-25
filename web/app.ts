@@ -186,7 +186,11 @@ function renderHeader(): void {
 function renderLensToggle(): void {
 	for (const el of lensesEl.querySelectorAll(".lensbtn")) {
 		const b = el as HTMLButtonElement;
-		b.classList.toggle("on", b.dataset.lens === lens);
+		const active = b.dataset.lens === lens;
+		b.classList.toggle("on", active);
+		// Expose the active lens programmatically, not by color alone, so AT
+		// announces which of the three lenses is selected.
+		b.setAttribute("aria-pressed", active ? "true" : "false");
 		b.onclick = () => {
 			lens = b.dataset.lens as typeof lens;
 			render();
@@ -225,8 +229,15 @@ function renderRegister(): void {
 		.join("");
 
 	const arrow = (k: string) => (sortKey === k ? (sortDir === 1 ? " ▲" : " ▼") : "");
+	// aria-sort exposes the sort state to AT so it isn't carried by the arrow glyph
+	// alone; only the active column gets ascending/descending, others "none".
+	const ariaSort = (k: string) =>
+		sortKey === k ? (sortDir === 1 ? "ascending" : "descending") : "none";
 	const head = (["date", "event", "party", "section"] as const)
-		.map((k) => `<th data-sort="${k}">${k[0].toUpperCase() + k.slice(1)}${arrow(k)}</th>`)
+		.map(
+			(k) =>
+				`<th data-sort="${k}" role="columnheader" aria-sort="${ariaSort(k)}"><button type="button" class="sortbtn">${k[0].toUpperCase() + k.slice(1)}${arrow(k)}</button></th>`,
+		)
 		.join("");
 
 	const rows = visibleEntries()
@@ -417,7 +428,7 @@ function cmpCell(v: Variation | undefined, k: ColKey): string {
 		return `<div class="cmp-cell missing"><div class="cmp-head"><span class="badge badge-missing">${colTitle(k)}</span></div><div class="cmp-empty">— not run for this page</div></div>`;
 	const canonical = v.source === "pdf_text";
 	const flag = v.flagged
-		? '<span class="badge badge-flag" title="flagged for review: low agreement or low fidelity">⚑ flagged</span>'
+		? '<span class="badge badge-flag" role="img" aria-label="Flagged for review: low agreement or low fidelity" title="flagged for review: low agreement or low fidelity">⚑ flagged</span>'
 		: "";
 	const head = canonical
 		? `<span class="badge badge-record">THE RECORD · PDF text layer</span><span class="cmp-meta muted">exact text from the filed PDF</span>`
@@ -460,7 +471,11 @@ function interactiveRecordBody(v: Variation): string {
 	let i = 0;
 	const body = v.text.replace(/\s+|\S+/g, (run) => {
 		if (/^\s/.test(run)) return esc(run);
-		return `<span class="tok" data-span="${i++}">${esc(run)}</span>`;
+		const idx = i++;
+		// Each token is a real keyboard-operable control with a programmatic
+		// selected state (aria-pressed), so the selection isn't carried by color
+		// alone and the page is fully navigable by keyboard.
+		return `<span class="tok" role="button" tabindex="0" aria-pressed="false" data-span="${idx}">${esc(run)}</span>`;
 	});
 	return `<pre class="cmp-text">${body}</pre>`;
 }
@@ -490,15 +505,34 @@ function mountRegionOverlay(wrap: HTMLElement, regions: Region[]): RegionOverlay
 		box.style.width = `${(r.x1 - r.x0) * 100}%`;
 		box.style.height = `${(r.y1 - r.y0) * 100}%`;
 		box.dataset.span = String(r.spanIndex);
+		// A keyboard-operable, labelled control with a programmatic selected state,
+		// so picking a word on the image is reachable by Tab and announced by AT.
+		box.setAttribute("role", "button");
+		box.tabIndex = 0;
+		box.setAttribute("aria-pressed", "false");
+		box.setAttribute("aria-label", `Locate word ${r.spanIndex + 1} on the page`);
 		box.onclick = () => pick(r.spanIndex);
+		box.onkeydown = (ev: KeyboardEvent) => {
+			if (ev.key === "Enter" || ev.key === " ") {
+				ev.preventDefault();
+				pick(r.spanIndex);
+			}
+		};
 		layer.appendChild(box);
 		boxes.set(r.spanIndex, box);
 	}
 	wrap.appendChild(layer);
 	return {
 		highlight(spanIndices) {
-			for (const b of boxes.values()) b.classList.remove("active");
-			for (const i of spanIndices) boxes.get(i)?.classList.add("active");
+			for (const b of boxes.values()) {
+				b.classList.remove("active");
+				b.setAttribute("aria-pressed", "false");
+			}
+			for (const i of spanIndices) {
+				const b = boxes.get(i);
+				b?.classList.add("active");
+				b?.setAttribute("aria-pressed", "true");
+			}
 		},
 		mark(spanIndices, cls) {
 			for (const i of spanIndices) boxes.get(i)?.classList.add(cls);
@@ -576,13 +610,23 @@ async function wireFocusPage(page: ExPage): Promise<void> {
 	const select = (span: number) => {
 		overlay.highlight([span]);
 		active?.classList.remove("active");
+		active?.setAttribute("aria-pressed", "false");
 		active = tokBySpan.get(span) ?? null;
 		active?.classList.add("active");
+		active?.setAttribute("aria-pressed", "true");
 		active?.scrollIntoView({ block: "nearest" });
 		wrap.querySelector<HTMLElement>(`.region-box[data-span="${span}"]`)?.scrollIntoView({ block: "nearest" });
 	};
 	overlay.onPick(select);
-	for (const [span, t] of tokBySpan) t.onclick = () => select(span);
+	for (const [span, t] of tokBySpan) {
+		t.onclick = () => select(span);
+		t.onkeydown = (ev: KeyboardEvent) => {
+			if (ev.key === "Enter" || ev.key === " ") {
+				ev.preventDefault();
+				select(span);
+			}
+		};
+	}
 }
 
 // The focused single page: the image with its region overlay beside the record
@@ -709,13 +753,18 @@ function worklist(roll: Rollup, locs: Map<string, PageLoc>): string {
 					return `<span class="reason reason-${cls}">${esc(REASON_LABEL[r] ?? r)}</span>`;
 				})
 				.join("");
-			return `<li><button class="worklink" data-goto="${esc(d.pageId)}"${
-				loc ? "" : " disabled"
-			}>${label}</button>${badges}</li>`;
+			// A disabled worklink (page not located in the drill-down tree) carries its
+			// disabled state programmatically and explains why, not by dimming alone.
+			const dis = loc
+				? ""
+				: ' disabled aria-disabled="true" title="This page is not present in the exploded corpus, so it can\'t be opened."';
+			return `<li><button class="worklink" data-goto="${esc(d.pageId)}"${dis}>${label}</button>${badges}</li>`;
 		})
 		.join("");
+	// "Flagged" names the review signal in text so it isn't carried by the ⚑ glyph
+	// or color alone; the count is labelled for AT, not left as a bare number.
 	return `<details class="worklist" open>
-      <summary>Flagged-page worklist <span class="muted">(${details.length})</span></summary>
+      <summary>Flagged-page worklist <span class="muted" aria-label="${details.length} flagged pages">(${details.length})</span></summary>
       <ul>${items}</ul>
     </details>`;
 }
