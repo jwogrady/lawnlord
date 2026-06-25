@@ -495,7 +495,8 @@ def test_is_transient_classifies_cloud_and_local_errors():
     import urllib.error
     import lawnlord.transcribe as tx
 
-    overloaded = RuntimeError("529"); overloaded.status_code = 529
+    overloaded = RuntimeError("529")
+    overloaded.status_code = 529
     assert tx._is_transient(overloaded) is True              # cloud overloaded
     http503 = urllib.error.HTTPError("u", 503, "busy", {}, None)
     assert tx._is_transient(http503) is True                 # Ollama warming (.code)
@@ -522,8 +523,6 @@ def test_page_holds_every_transcription_variation(tmp_path):
     # plus a row per vision model — each addressable by its surrogate id. They
     # coexist; the surrogate key never collapses them into one lineage.
     import duckdb
-
-    import lawnlord.transcribe as tx
 
     case_dir = _exploded_case(tmp_path, pages=1)
     con = main.open_case_db(case_dir / "lawnlord.duckdb")
