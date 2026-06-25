@@ -19,6 +19,12 @@ const CASE_DIR = process.env.CASE_DIR ?? ".";
 const REPO_ROOT = join(import.meta.dir, "..");
 const PORT = Number(process.env.PORT ?? 4173);
 
+// This viewer serves sensitive legal PDFs, so it binds to loopback only by
+// default — unreachable from other hosts on the LAN. Exposing it on the
+// network requires a deliberate opt-in: set HOST (e.g. HOST=0.0.0.0) to bind
+// elsewhere. Without that env var the server only answers on 127.0.0.1.
+const HOST = process.env.HOST ?? "127.0.0.1";
+
 // The extracted intake dir (data.json + files/ + pages/): either CASE_DIR
 // itself, or the single folder under CASE_DIR/intake that holds a data.json.
 function resolveIntakeDir(): string {
@@ -55,6 +61,7 @@ function serveFromIntake(sub: string, rest: string): Response {
 }
 
 const server = Bun.serve({
+	hostname: HOST,
 	port: PORT,
 	development: { hmr: true, console: true },
 	routes: {
