@@ -228,13 +228,34 @@ def open_case_db(
     return duckdb.connect(str(path))
 
 
+class SchemaVersionMismatch(RuntimeError):
+    """A per-case DB was stamped by a different ``SCHEMA_VERSION`` than the code
+    opening it. The DB is a regenerable index, so the fix is always to regenerate
+    it (re-run the import) — never to silently proceed against a stale schema."""
+
+
 def apply_schema(con: duckdb.DuckDBPyConnection) -> None:
-    """Apply the versioned M1 schema. Idempotent: running twice is a no-op."""
+    """Apply the versioned M1 schema. Idempotent: running twice is a no-op.
+
+    Refuses to proceed if the DB was stamped by a different ``SCHEMA_VERSION``
+    (older or newer): a per-case DB is a derived index, so a mismatch means the
+    operator must regenerate it (re-run the import) rather than risk
+    misreporting provenance against a stale schema.
+    """
     for statement in _SCHEMA_STATEMENTS:
         con.execute(statement)
-    row = con.execute("SELECT count(*) FROM schema_meta").fetchone()
-    if row[0] == 0:
+    row = con.execute("SELECT version FROM schema_meta").fetchone()
+    if row is None:
         con.execute("INSERT INTO schema_meta (version) VALUES (?)", [SCHEMA_VERSION])
+        return
+    stored = row[0]
+    if stored != SCHEMA_VERSION:
+        raise SchemaVersionMismatch(
+            f"schema version mismatch: this database was stamped v{stored}, "
+            f"but the code expects v{SCHEMA_VERSION}. Per-case databases are a "
+            "regenerable index — regenerate this one (re-run the import) instead "
+            "of opening it with mismatched code."
+        )
 
 
 def load_fts(con: duckdb.DuckDBPyConnection) -> bool:

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from .cli import main
 from .console import console
-from .db import SCHEMA_VERSION, apply_schema, open_case_db
+from .db import SCHEMA_VERSION, SchemaVersionMismatch, apply_schema, open_case_db
 from .explode import explode_case
 from .export import (
     export_actual,
