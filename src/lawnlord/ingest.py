@@ -232,13 +232,13 @@ def ingest_case(con: duckdb.DuckDBPyConnection, case: Case, generated_at: str) -
     used_links: set[tuple[str, str]] = set()
     for event_id, files in event_files:
         for intake_path in files:
-            image_id = path_to_image.get(intake_path)
-            if image_id is None or (image_id, event_id) in used_links:
+            linked_image = path_to_image.get(intake_path)
+            if linked_image is None or (linked_image, event_id) in used_links:
                 continue
-            used_links.add((image_id, event_id))
+            used_links.add((linked_image, event_id))
             con.execute(
                 "INSERT INTO image_events (image_id, event_id) VALUES (?, ?)",
-                [image_id, event_id],
+                [linked_image, event_id],
             )
 
     return {

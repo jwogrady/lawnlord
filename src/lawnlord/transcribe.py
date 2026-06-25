@@ -173,8 +173,10 @@ DEFAULT_NUM_CTX = 8192
 #                    be capped; qwen reads the native render fine (best fidelity).
 #   * num_predict — cap on generated tokens. minicpm-v ignores the JSON stop and
 #                    rambles to the context limit, so bound it and salvage the text.
-_DEFAULT_TUNING = {"num_ctx": DEFAULT_NUM_CTX, "max_image_px": None, "num_predict": -1}
-_LOCAL_TUNING = {
+_DEFAULT_TUNING: dict[str, int | None] = {
+    "num_ctx": DEFAULT_NUM_CTX, "max_image_px": None, "num_predict": -1,
+}
+_LOCAL_TUNING: dict[str, dict[str, int | None]] = {
     # Ollama runs the vision projector on CPU (--no-mmproj-offload), so per-page
     # cost is the CPU image-encode and scales ~linearly with image tokens. A
     # 300-DPI page (~4100 tokens) is ~64 s; 1500 px (~1800 tokens) is ~24 s with
@@ -187,7 +189,7 @@ _LOCAL_TUNING = {
 }
 
 
-def _tuning_for(model: str) -> dict:
+def _tuning_for(model: str) -> dict[str, int | None]:
     for prefix, tuning in _LOCAL_TUNING.items():
         if model.startswith(prefix):
             return tuning
@@ -203,7 +205,7 @@ def _b64_png_scaled(path: str | Path, max_px: int | None) -> str:
 
     from PIL import Image
 
-    im = Image.open(path)
+    im: Image.Image = Image.open(path)
     longest = max(im.size)
     if longest <= max_px:
         return _b64_png(path)
@@ -498,6 +500,10 @@ def _transcribe_with_retry(
             # in lockstep against a shared overloaded API.
             delay = base_delay * (2 ** attempt)
             time.sleep(delay * (0.5 + random.random()))
+    # Unreachable for attempts >= 1 (the final iteration always returns or
+    # raises); guards the degenerate attempts <= 0 call and satisfies the
+    # return-type checker.
+    raise ValueError(f"attempts must be >= 1, got {attempts}")
 
 
 def _embedded_text(intake_dir, intake_path, image_id, page_number, cache) -> str | None:
@@ -809,7 +815,7 @@ def measure_case(
         avg_fidelity[label] = (sum(vals) / len(vals)) if vals else 0.0
     # Escalation fraction: share of sampled pages a backend reads below each T.
     thresholds = (0.7, 0.8, 0.9, 0.95)
-    escalation_fraction = {label: {} for label in labels}
+    escalation_fraction: dict[str, dict[float, float]] = {label: {} for label in labels}
     n = len(per_page)
     for label in labels:
         for t in thresholds:
