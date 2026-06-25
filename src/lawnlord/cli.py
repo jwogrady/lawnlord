@@ -30,6 +30,7 @@ from .explode import explode_case
 from .export import export_actual, export_exploded, export_metrics, export_regions
 from .ingest import ingest_case
 from .intake import load_intake, scaffold
+from .logging_setup import setup_run_logging
 from .reader import captured_at, extract_zip, find_intake_dir
 from .regions import capture_pdf_regions
 from .transcribe import (
@@ -222,6 +223,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--escalate-below", type=float, default=None, metavar="T",
         help="After the pass, re-transcribe model pages with fidelity < T on cloud "
         "Claude (appends a revision; needs ANTHROPIC_API_KEY). E.g. 0.9",
+    )
+    p_transcribe.add_argument(
+        "--log-level", default=None, metavar="LEVEL",
+        help="Level for the per-run log file under <case-dir>/logs/ (DEBUG, INFO, "
+        "WARNING, ERROR). Overrides the LAWNLORD_LOG_LEVEL env var; defaults to INFO. "
+        "Does not change the console output.",
     )
 
     p_measure = sub.add_parser(
@@ -484,6 +491,9 @@ def _cmd_regions(args: argparse.Namespace) -> None:
 
 def _cmd_transcribe(args: argparse.Namespace) -> None:
     case_dir = Path(args.case_dir).resolve()
+    # Per-run file log (additive to the Rich console): captures the per-page
+    # failures the passes below otherwise swallow. Lands under <case-dir>/logs/.
+    log_path = setup_run_logging(case_dir, level=args.log_level)
     transcribers = _build_transcribers(args.backend, args.model, args.ollama_host,
                                         args.max_image_px, args.llamacpp_host)
     if not transcribers:
@@ -538,7 +548,8 @@ def _cmd_transcribe(args: argparse.Namespace) -> None:
         console.print(f"[yellow]Skipped (no PNG):[/] {len(stats['skipped'])}")
     if stats["failed"]:
         console.print(
-            f"[red]Failed (vision error after retries):[/] {len(stats['failed'])}"
+            f"[red]Failed (vision error after retries):[/] {len(stats['failed'])} "
+            f"— see {log_path}"
         )
     console.print("[green]Done.[/]")
 

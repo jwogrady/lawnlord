@@ -16,6 +16,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import logging
 import random
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -24,6 +25,12 @@ from typing import Protocol
 
 import duckdb
 import pypdfium2 as pdfium
+
+# Per-run file logger (configured by logging_setup at run start). Records here
+# are additive to the Rich console: they capture the per-page failures the
+# passes below otherwise swallow (reason, model, exception/traceback). Until a
+# run installs a FileHandler, these records go nowhere — harmless.
+_log = logging.getLogger("lawnlord.transcribe")
 
 # Below this many non-whitespace characters, a page's embedded text layer is
 # treated as absent (scanned/image-only) and the page falls through to the
@@ -358,6 +365,11 @@ class LlamaCppTranscriber:
         # higher-budget retry instead of silently trusting incomplete output.
         if choice.get("finish_reason") == "length":
             result["fidelity"] = 0.0
+            _log.warning(
+                "llamacpp transcription truncated (finish_reason='length'); "
+                "forcing fidelity=0.0 model=%s png=%s",
+                self.model, png_path,
+            )
         return result
 
 
@@ -371,7 +383,11 @@ def _ollama_tags(host: str | None = None) -> list[dict] | None:
     try:
         with urllib.request.urlopen(f"{host}/api/tags", timeout=3) as resp:
             tags = json.loads(resp.read())
-    except Exception:
+    except Exception as exc:
+        _log.warning(
+            "Ollama unreachable at %s/api/tags (%s: %s); local tier unavailable",
+            host, type(exc).__name__, exc,
+        )
         return None
     return tags.get("models", [])
 
@@ -465,7 +481,18 @@ def _transcribe_with_retry(
         try:
             return transcriber.transcribe(png_path)
         except Exception as exc:
-            if attempt + 1 >= attempts or not _is_transient(exc):
+            transient = _is_transient(exc)
+            if attempt + 1 >= attempts or not transient:
+                # The error propagates to the caller (which records the page in
+                # `failed`); log the exhausted/non-transient cause with model and
+                # page so the file accounts for why this attempt gave up.
+                _log.warning(
+                    "transcribe attempt %d/%d gave up (%s) model=%s png=%s: %s: %s",
+                    attempt + 1, attempts,
+                    "retries exhausted" if transient else "non-transient error",
+                    getattr(transcriber, "model", "?"), png_path,
+                    type(exc).__name__, exc,
+                )
                 raise
             # Exponential backoff with jitter, so concurrent workers don't retry
             # in lockstep against a shared overloaded API.
@@ -607,15 +634,20 @@ def transcribe_case(
         with ThreadPoolExecutor(max_workers=workers) as pool:
             future_to_unit = {
                 pool.submit(_transcribe_with_retry, tr, png):
-                    (page_id, case_id, rev)
+                    (page_id, case_id, rev, tr.model)
                 for (page_id, case_id, rev, png, tr) in vision
             }
             for future in as_completed(future_to_unit):
-                page_id, case_id, rev = future_to_unit[future]
+                page_id, case_id, rev, model = future_to_unit[future]
                 try:
                     result = future.result()
-                except Exception:
+                except Exception as exc:
                     failed.append(page_id)
+                    _log.error(
+                        "transcribe failed page_id=%s rev=%s model=%s: %s: %s",
+                        page_id, rev, model, type(exc).__name__, exc,
+                        exc_info=exc,
+                    )
                     continue
                 con.execute(_PAGE_TEXT_INSERT, [_row_id(page_id, "ai", result["model"], rev),
                                       case_id, page_id, rev, "ai", result["text"],
@@ -673,6 +705,10 @@ def escalate_case(
         png = pages_dir / rel
         if not png.exists():
             failed.append(page_id)
+            _log.warning(
+                "escalate skipped page_id=%s model=%s: missing page PNG %s",
+                page_id, cloud_transcriber.model, png,
+            )
             continue
         targets.append((case_id, page_id, rev + 1, png))  # append the next rev
 
@@ -690,8 +726,13 @@ def escalate_case(
                 case_id, page_id, rev = future_to_page[future]
                 try:
                     result = future.result()
-                except Exception:
+                except Exception as exc:
                     failed.append(page_id)
+                    _log.error(
+                        "escalate failed page_id=%s rev=%s model=%s: %s: %s",
+                        page_id, rev, cloud_transcriber.model,
+                        type(exc).__name__, exc, exc_info=exc,
+                    )
                     continue
                 con.execute(_PAGE_TEXT_INSERT, [_row_id(page_id, "ai", result["model"], rev),
                             case_id, page_id, rev, "ai",

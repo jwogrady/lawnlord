@@ -14,6 +14,16 @@ closed.
 
 ### Added
 
+- **Per-run transcription log file** (#156). The transcribe pass now configures a `logging.Logger`
+  with a per-run `FileHandler` writing under `<case-dir>/logs/transcribe-<timestamp>.log`, additive
+  to (and leaving unchanged) the user-facing Rich console. Every per-page failure that the passes
+  previously swallowed — vision errors in `transcribe_case`/`escalate_case`, retry exhaustion, the
+  llama.cpp `finish_reason='length'` truncation safeguard, and an unreachable Ollama server — now
+  emits one record carrying the page id, revision, backend/model label, and the exception type,
+  message, and traceback. A run with failed pages still succeeds; the log accounts for every page in
+  the returned `failed` list. The file level is configurable without a code edit via the
+  `--log-level` flag or the `LAWNLORD_LOG_LEVEL` env var (default INFO); console verbosity is
+  unchanged.
 - **Manifest sha256 verification on import** (#158). The intake manifest's per-file `sha256` is now
   a verified contract, not just recorded metadata. On import each filed PDF the manifest declares is
   hashed afresh and compared to its declared hash; a mismatch (tampered/truncated bytes) or a
