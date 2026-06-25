@@ -76,8 +76,8 @@ def _rgb(hexc: str) -> tuple[float, float, float]:
 
 def _hsl_triplet(hexc: str) -> str:
     r, g, b = _rgb(hexc)
-    h, l, s = colorsys.rgb_to_hls(r, g, b)
-    return f"{round(h * 360)} {round(s * 100)}% {round(l * 100)}%"
+    hue, light, sat = colorsys.rgb_to_hls(r, g, b)
+    return f"{round(hue * 360)} {round(sat * 100)}% {round(light * 100)}%"
 
 
 def _resolve(v: str) -> str:
