@@ -107,5 +107,5 @@ zip or touches DuckDB directly. Use Bun, not Node/npm.
 
 The ADRs (`docs/adr/0001`–`0009`) and `CHANGELOG.md` track the current design. But `README.md` and
 `docs/architecture.md` lag the code — they describe an earlier "alpha rebuild" where `import` and the
-reader weren't wired and the schema was v6. **The code is the ground truth** (schema is v10; the full
+reader weren't wired and the schema was v6. **The code is the ground truth** (schema is v11; the full
 import→explode→transcribe→export pipeline exists). If you touch those docs, reconcile them to the code.
