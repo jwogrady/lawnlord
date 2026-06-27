@@ -81,6 +81,11 @@ Labeled **KNOWN** (from git) vs **LIKELY** (inferred) vs **UNCERTAIN** (needs co
 
 ## cosmos check-in checklist (run at home)
 
+> **Automated:** run [`scripts/cosmos/capture-cosmos.sh`](../../scripts/cosmos/capture-cosmos.sh)
+> (read-only) to capture all of the below into a timestamped folder + a lossless git bundle, with
+> secrets redacted. The manual steps here are the fallback / explanation of what it grabs. Full
+> recovery + merge flow: [`scripts/cosmos/README.md`](../../scripts/cosmos/README.md).
+
 Capture everything **before** changing anything. Save the output somewhere outside the repo.
 
 ```bash

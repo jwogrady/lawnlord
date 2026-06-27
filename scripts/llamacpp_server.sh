@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
+# ⚠ NVIDIA / CUDA (cosmos) launcher — UNVERIFIED on real cosmos hardware (2026-06-27).
+#   This is the home-box (NVIDIA, native Linux) path: it resolves Ollama's bundled
+#   CUDA backend (cuda_v13/cuda_v12). It has NOT been run/benchmarked on cosmos in
+#   this reconstruction. The proven cosmic (AMD/Vulkan) path is a DIFFERENT launcher:
+#   scripts/cosmic/serve_vision.cmd (+ scripts/cosmic/transcribe_vision.sh).
+#   Do not assume CUDA defaults here apply to the AMD box, or vice versa. Validate
+#   against scripts/cosmos/capture-cosmos.sh output before trusting this on cosmos.
+#
 # Standalone llama.cpp vision server with the multimodal projector ON the GPU.
 #
 # Ollama launches qwen2.5-VL with --no-mmproj-offload, stranding the vision
