@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-# Local-GPU, model-major page transcription for lawnlord.
+# Local-GPU, model-major page transcription for lawnlord (the Ollama --backend
+# local path: downscales to ~1500px, vision encode on CPU).
+#
+# NOTE (cosmic/AMD): this is the SLOW path (~100 min for the 255-page case). For
+# the ~10-min native-300-DPI job, use the Vulkan vision server instead:
+#     scripts/cosmic/serve_vision.cmd 4 2048   (Windows)  +  scripts/cosmic/transcribe_vision.sh
+# See docs/performance/cosmic-backend-comparison.md.
 #
 # MODEL-MAJOR: sweep all pages with ONE model, then the next. Each model loads
 # into VRAM once and — because requests come back-to-back — stays resident for

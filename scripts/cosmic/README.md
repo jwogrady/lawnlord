@@ -27,6 +27,7 @@ uv run lawnlord transcribe --backend llamacpp --workers 8 \
 | File | What it does |
 |---|---|
 | `serve_vision.cmd` | Launches Ollama's bundled `llama-server.exe` on **Vulkan** with the qwen2.5-VL projector **on the GPU**. Args: `[NP] [UBATCH]`, default `4 2048` (the benchmarked production point). |
+| `transcribe_vision.sh` | **WSL-side fast-path runner.** Preflights the :18082 Vulkan server and **fails loudly if it's down** (instead of silently dropping to the ~100-min Ollama path), then runs `lawnlord transcribe --backend llamacpp --workers 8`. This is the ~10-min job for the 255-page case. |
 | `bench.py` | Apples-to-apples throughput/fidelity harness for **both** backends: `python bench.py {llamacpp\|ollama} <host> <maxpx:0=native> <pagedir> <workers>`. Prints pages/min, gen tok/s, fidelity, failures. |
 | `dump.py` | Prints the actual transcription text per page (content sanity check). **Outputs case text — do not redirect into the repo.** |
 | `sweep.ps1` | Drives the full `-np`/`-ub` sweep (restart → warm → measure → VRAM peak per config) → `sweep_results.txt`. |
