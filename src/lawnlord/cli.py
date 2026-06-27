@@ -191,7 +191,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_transcribe.add_argument(
         "--ollama-host", default=None,
-        help="Ollama server for --backend local (default: http://localhost:11434)",
+        help="Ollama server for --backend local (default: $OLLAMA_HOST, else "
+        "http://localhost:11434)",
     )
     p_transcribe.add_argument(
         "--llamacpp-host", default=None,
@@ -481,7 +482,8 @@ def _main(argv: list[str] | None = None) -> None:
 
     if args.command == "transcribe":
         case_dir = Path(args.case_dir).resolve()
-        transcribers = _build_transcribers(args.backend, args.model, args.ollama_host,
+        ollama_host = args.ollama_host or os.environ.get("OLLAMA_HOST")
+        transcribers = _build_transcribers(args.backend, args.model, ollama_host,
                                             args.max_image_px, args.llamacpp_host)
         if not transcribers:
             return
@@ -543,7 +545,7 @@ def _main(argv: list[str] | None = None) -> None:
     if args.command == "measure":
         case_dir = Path(args.case_dir).resolve()
         transcribers: dict = {}
-        host = args.ollama_host
+        host = args.ollama_host or os.environ.get("OLLAMA_HOST")
         for m in (s.strip() for s in args.models.split(",") if s.strip()):
             if ollama_available(m, host):
                 transcribers[m] = LocalTranscriber(model=m, host=host)
