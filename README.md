@@ -52,6 +52,24 @@ A stripped, importable foundation (the zip-view "studs"):
 - **`workspace.py`** — the resolved `Case` (its model + output paths). `from_intake` is a stub
   awaiting the zip → `CaseModel` reader (the next branch).
 
+## Local GPU transcription & dev machines
+
+`lawnlord transcribe` reads filed pages with a vision model locally. The pipeline is shared; only
+the **per-machine backend wiring** differs, isolated in gitignored `.env` files seeded from
+committed [`profiles/`](profiles/) (`cosmic-amd`, `cosmos-nvidia`, `cpu-fallback`) — see the
+[multi-machine setup guide](docs/reference/multi-machine-setup.md). To activate one:
+`cp profiles/<name>.env .env` then append `ANTHROPIC_API_KEY`.
+
+- **[Multi-machine setup](docs/reference/multi-machine-setup.md)** — cosmic↔cosmos differences, the
+  config strategy, and the at-home check-in checklist.
+- **[Development machine reference (`cosmic`)](docs/reference/development-machine.md)** — full
+  AMD/Vulkan workstation spec, runtime config, and validation checklist.
+- **[Native 300-DPI Vulkan benchmark](docs/performance/native-300dpi-vulkan-benchmark.md)** — the
+  `-np`/`-ub` sweep; production point **`-np 4 -ub 2048` → ~24 pages/min** at fidelity 0.98.
+- **[Backend comparison](docs/performance/cosmic-backend-comparison.md)** — llama.cpp/Vulkan vs
+  Ollama (~10×) and why ROCm/HIP is a dead end on gfx1030.
+- **[`scripts/cosmic/`](scripts/cosmic/)** — the AMD/Vulkan Windows-side server + benchmark tooling.
+
 ## Install
 
 ```bash
