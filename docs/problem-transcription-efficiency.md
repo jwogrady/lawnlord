@@ -2,6 +2,29 @@
 
 Status: Authoritative — the problem this effort solves. Ordered by impact.
 
+## Decision (2026-06-26): full-fidelity, GPU-pegged local run
+
+Owner directive, supersedes the earlier "150 DPI is enough / right-sizing is minor" stance:
+
+1. **300 DPI end-to-end.** Stored PNGs render at **300 DPI** (`explode --dpi 300`, 2550×3301) and the
+   vision tier is fed the **native** render (`transcribe --max-image-px 0` — no downscale). 150 DPI and
+   the 1500-px transmit cap are no longer the target; "change the stored PNG DPI" is now **in scope**.
+2. **Best local model.** Primary vision model is **`qwen2.5vl:7b`** (highest-fidelity local model that
+   fits the RX 6900 XT's 16 GB). Low-`fidelity` pages still escalate to cloud Opus (`--escalate-below`)
+   as the quality backstop — best-of-both, not either/or.
+3. **Max speed = peg the GPU, keep the CPU out of the loop. Target ≈30 min for the full case.** The
+   vision encoder (mmproj) must run **on the GPU**, never the CPU (verified: on the Windows Ollama/Vulkan
+   build the encode is GPU-side, CPU idle 0–5% per page). Saturate the GPU via concurrent slots
+   (`OLLAMA_NUM_PARALLEL`≥~4 + matching `--workers`) and `OLLAMA_FLASH_ATTENTION=1`. No CPU-bound step may
+   gate throughput. At ~25 s/page native-300 serial (255 pages ≈ 106 min), ~4 concurrent slots ≈ 27 min.
+4. **Both layers, on every page, for comparison (ADR-0006 "Exhaustive").** This SUPERSEDES the original
+   "vision only on the 106 image-only pages" framing below. Vision runs on **all 255 pages**, so every
+   born-digital page carries BOTH its `pdf_text` reading (free, fidelity 1.0) AND a full qwen `ai`
+   reading — the owner wants to compare them. The PDF-text pre-pass (lever 0) stays as a free, exact
+   layer; it no longer short-circuits the vision tier.
+5. **Full transcriptions, never partial.** Vision `num_predict` stays unbounded (`-1`) so pages are
+   transcribed in full (no token-cap truncation); the run completes all 255 pages (resume fills any gap).
+
 ## Problem
 
 `lawnlord transcribe` is a serial, blocking loop: for a 255-page case it makes
@@ -145,8 +168,8 @@ numbers so the milestone issues' cross-references stay valid.
 
 - Multi-case / corpus-scale orchestration or a job queue (scope is this case).
 - Batch API path (superseded by local-first at this scope).
-- Finer PDF-to-document splitting, or changing the DPI of the **stored** PNGs.
-  (Note: extracting a PDF's *existing* embedded text layer is **in scope** as
-  lever 0 — it is distinct from pixel-recognition OCR, which stays a non-goal as
-  a *primary* path; OCR/vision is the fallback only for image-only pages.)
+- Finer PDF-to-document splitting. (Stored-PNG DPI is now **in scope** — see Decision (2026-06-26):
+  stored renders are 300 DPI. And per ADR-0006 vision runs on **every** page, not just image-only ones,
+  so the embedded text layer and the vision reading coexist for comparison rather than one replacing
+  the other.)
 - Any change to the Actual/Exploded lenses or the web viewer.

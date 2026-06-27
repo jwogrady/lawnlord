@@ -13,6 +13,12 @@
 # Runs in the foreground (Ctrl-C to stop). Use tmux/nohup to keep it up.
 set -euo pipefail
 
+cd "$(dirname "$0")/.."   # repo root, regardless of where it's invoked from
+
+# Per-machine config (separated from code): committed defaults are the COSMOS
+# profile; a gitignored .env at the repo root overrides any knob. See .env.example.
+if [ -f .env ]; then set -a; . ./.env; set +a; fi
+
 MODEL="${MODEL:-qwen2.5vl:7b}"
 PORT="${PORT:-18082}"
 HOST_ADDR="${HOST_ADDR:-127.0.0.1}"
