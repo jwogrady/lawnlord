@@ -133,9 +133,45 @@ function esc(s: string): string {
 	);
 }
 
+// A visible, human-readable failure state in place of the perpetual "Loading…"
+// spinner. This is shown only when the case export could not be fetched/parsed —
+// it is distinct from a legitimately loaded-but-empty case (which still renders
+// the normal register), and `data` is never set from it, so it can never pass as
+// the record. The cause is left uncached: the user retries by reloading.
+function renderLoadError(detail: string): void {
+	app.innerHTML = `<section class="loaderror" role="alert">
+    <h2>Could not load the case</h2>
+    <p>The case export failed, so the record can't be shown. This is not an empty
+    case — the viewer never received it.</p>
+    <p class="muted">If the cause is transient (e.g. the case database is locked
+    by another process), reload to retry.</p>
+    <pre class="loaderror-detail">${esc(detail)}</pre>
+  </section>`;
+}
+
 async function load(): Promise<void> {
-	data = (await (await fetch("/api/case")).json()) as Payload;
-	render();
+	try {
+		const res = await fetch("/api/case");
+		// A non-200 (e.g. the route's structured 500) is a failure path — never
+		// parse the body as a Payload. Surface the server's error message if present.
+		if (!res.ok) {
+			let detail = `HTTP ${res.status}`;
+			try {
+				const body = (await res.json()) as { error?: string };
+				if (body && typeof body.error === "string") detail = body.error;
+			} catch {
+				/* non-JSON error body — keep the HTTP status as the detail */
+			}
+			renderLoadError(detail);
+			return;
+		}
+		data = (await res.json()) as Payload;
+		render();
+	} catch (err) {
+		// Fetch/parse/render threw (server unreachable, malformed JSON, a render
+		// bug): show the error state instead of leaving "Loading…" forever.
+		renderLoadError(String(err));
+	}
 }
 
 function renderHeader(): void {
@@ -150,7 +186,11 @@ function renderHeader(): void {
 function renderLensToggle(): void {
 	for (const el of lensesEl.querySelectorAll(".lensbtn")) {
 		const b = el as HTMLButtonElement;
-		b.classList.toggle("on", b.dataset.lens === lens);
+		const active = b.dataset.lens === lens;
+		b.classList.toggle("on", active);
+		// Expose the active lens programmatically, not by color alone, so AT
+		// announces which of the three lenses is selected.
+		b.setAttribute("aria-pressed", active ? "true" : "false");
 		b.onclick = () => {
 			lens = b.dataset.lens as typeof lens;
 			render();
@@ -189,8 +229,15 @@ function renderRegister(): void {
 		.join("");
 
 	const arrow = (k: string) => (sortKey === k ? (sortDir === 1 ? " ▲" : " ▼") : "");
+	// aria-sort exposes the sort state to AT so it isn't carried by the arrow glyph
+	// alone; only the active column gets ascending/descending, others "none".
+	const ariaSort = (k: string) =>
+		sortKey === k ? (sortDir === 1 ? "ascending" : "descending") : "none";
 	const head = (["date", "event", "party", "section"] as const)
-		.map((k) => `<th data-sort="${k}">${k[0].toUpperCase() + k.slice(1)}${arrow(k)}</th>`)
+		.map(
+			(k) =>
+				`<th data-sort="${k}" role="columnheader" aria-sort="${ariaSort(k)}"><button type="button" class="sortbtn">${k[0].toUpperCase() + k.slice(1)}${arrow(k)}</button></th>`,
+		)
 		.join("");
 
 	const rows = visibleEntries()
@@ -381,7 +428,7 @@ function cmpCell(v: Variation | undefined, k: ColKey): string {
 		return `<div class="cmp-cell missing"><div class="cmp-head"><span class="badge badge-missing">${colTitle(k)}</span></div><div class="cmp-empty">— not run for this page</div></div>`;
 	const canonical = v.source === "pdf_text";
 	const flag = v.flagged
-		? '<span class="badge badge-flag" title="flagged for review: low agreement or low fidelity">⚑ flagged</span>'
+		? '<span class="badge badge-flag" role="img" aria-label="Flagged for review: low agreement or low fidelity" title="flagged for review: low agreement or low fidelity">⚑ flagged</span>'
 		: "";
 	const head = canonical
 		? `<span class="badge badge-record">THE RECORD · PDF text layer</span><span class="cmp-meta muted">exact text from the filed PDF</span>`
@@ -424,7 +471,11 @@ function interactiveRecordBody(v: Variation): string {
 	let i = 0;
 	const body = v.text.replace(/\s+|\S+/g, (run) => {
 		if (/^\s/.test(run)) return esc(run);
-		return `<span class="tok" data-span="${i++}">${esc(run)}</span>`;
+		const idx = i++;
+		// Each token is a real keyboard-operable control with a programmatic
+		// selected state (aria-pressed), so the selection isn't carried by color
+		// alone and the page is fully navigable by keyboard.
+		return `<span class="tok" role="button" tabindex="0" aria-pressed="false" data-span="${idx}">${esc(run)}</span>`;
 	});
 	return `<pre class="cmp-text">${body}</pre>`;
 }
@@ -454,15 +505,34 @@ function mountRegionOverlay(wrap: HTMLElement, regions: Region[]): RegionOverlay
 		box.style.width = `${(r.x1 - r.x0) * 100}%`;
 		box.style.height = `${(r.y1 - r.y0) * 100}%`;
 		box.dataset.span = String(r.spanIndex);
+		// A keyboard-operable, labelled control with a programmatic selected state,
+		// so picking a word on the image is reachable by Tab and announced by AT.
+		box.setAttribute("role", "button");
+		box.tabIndex = 0;
+		box.setAttribute("aria-pressed", "false");
+		box.setAttribute("aria-label", `Locate word ${r.spanIndex + 1} on the page`);
 		box.onclick = () => pick(r.spanIndex);
+		box.onkeydown = (ev: KeyboardEvent) => {
+			if (ev.key === "Enter" || ev.key === " ") {
+				ev.preventDefault();
+				pick(r.spanIndex);
+			}
+		};
 		layer.appendChild(box);
 		boxes.set(r.spanIndex, box);
 	}
 	wrap.appendChild(layer);
 	return {
 		highlight(spanIndices) {
-			for (const b of boxes.values()) b.classList.remove("active");
-			for (const i of spanIndices) boxes.get(i)?.classList.add("active");
+			for (const b of boxes.values()) {
+				b.classList.remove("active");
+				b.setAttribute("aria-pressed", "false");
+			}
+			for (const i of spanIndices) {
+				const b = boxes.get(i);
+				b?.classList.add("active");
+				b?.setAttribute("aria-pressed", "true");
+			}
 		},
 		mark(spanIndices, cls) {
 			for (const i of spanIndices) boxes.get(i)?.classList.add(cls);
@@ -484,7 +554,9 @@ async function wireFocusPage(page: ExPage): Promise<void> {
 	if (regions === undefined) {
 		// Only a successful read is cached; a transient failure (a 500 or a
 		// network error) is left uncached so the next focus on this page retries
-		// rather than being stuck text-only for the session.
+		// rather than being stuck text-only for the session. A 200 with an empty
+		// array is a success (regions were never captured for this corpus) and IS
+		// cached — distinct from the retryable error path, which returns here.
 		try {
 			const res = await fetch(`/api/regions?page=${encodeURIComponent(page.id)}`);
 			if (!res.ok) return;
@@ -498,7 +570,19 @@ async function wireFocusPage(page: ExPage): Promise<void> {
 	// The fetch may have resolved after the user navigated away: only mount if
 	// this page is still the focused one and its wrapper is still in the live DOM.
 	if (exPageId !== page.id || !wrap.isConnected) return;
-	if (!regions.length) return; // graceful text-only fallback
+	if (!regions.length) {
+		// The export succeeded but carried no geometry for this page — regions were
+		// never captured for this corpus (no `lawnlord regions` run). Surface a
+		// clear, non-alarming inline signal beside the image instead of a blank
+		// overlay. Read-only: derived solely from the (empty) export payload; the
+		// viewer never infers boxes. Run `lawnlord regions` and the same page then
+		// renders boxes. The error path above never reaches here (it returns).
+		const note = document.createElement("div");
+		note.className = "region-empty";
+		note.textContent = "Regions not captured for this corpus — run lawnlord regions to locate words on the page.";
+		wrap.appendChild(note);
+		return;
+	}
 	const overlay = mountRegionOverlay(wrap, regions);
 
 	// Record tokens indexed by ordinal for O(1) lookup (mirrors the box map).
@@ -526,13 +610,23 @@ async function wireFocusPage(page: ExPage): Promise<void> {
 	const select = (span: number) => {
 		overlay.highlight([span]);
 		active?.classList.remove("active");
+		active?.setAttribute("aria-pressed", "false");
 		active = tokBySpan.get(span) ?? null;
 		active?.classList.add("active");
+		active?.setAttribute("aria-pressed", "true");
 		active?.scrollIntoView({ block: "nearest" });
 		wrap.querySelector<HTMLElement>(`.region-box[data-span="${span}"]`)?.scrollIntoView({ block: "nearest" });
 	};
 	overlay.onPick(select);
-	for (const [span, t] of tokBySpan) t.onclick = () => select(span);
+	for (const [span, t] of tokBySpan) {
+		t.onclick = () => select(span);
+		t.onkeydown = (ev: KeyboardEvent) => {
+			if (ev.key === "Enter" || ev.key === " ") {
+				ev.preventDefault();
+				select(span);
+			}
+		};
+	}
 }
 
 // The focused single page: the image with its region overlay beside the record
@@ -659,13 +753,18 @@ function worklist(roll: Rollup, locs: Map<string, PageLoc>): string {
 					return `<span class="reason reason-${cls}">${esc(REASON_LABEL[r] ?? r)}</span>`;
 				})
 				.join("");
-			return `<li><button class="worklink" data-goto="${esc(d.pageId)}"${
-				loc ? "" : " disabled"
-			}>${label}</button>${badges}</li>`;
+			// A disabled worklink (page not located in the drill-down tree) carries its
+			// disabled state programmatically and explains why, not by dimming alone.
+			const dis = loc
+				? ""
+				: ' disabled aria-disabled="true" title="This page is not present in the exploded corpus, so it can\'t be opened."';
+			return `<li><button class="worklink" data-goto="${esc(d.pageId)}"${dis}>${label}</button>${badges}</li>`;
 		})
 		.join("");
+	// "Flagged" names the review signal in text so it isn't carried by the ⚑ glyph
+	// or color alone; the count is labelled for AT, not left as a bare number.
 	return `<details class="worklist" open>
-      <summary>Flagged-page worklist <span class="muted">(${details.length})</span></summary>
+      <summary>Flagged-page worklist <span class="muted" aria-label="${details.length} flagged pages">(${details.length})</span></summary>
       <ul>${items}</ul>
     </details>`;
 }

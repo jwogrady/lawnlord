@@ -16,6 +16,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import logging
 import random
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -24,6 +25,12 @@ from typing import Protocol
 
 import duckdb
 import pypdfium2 as pdfium
+
+# Per-run file logger (configured by logging_setup at run start). Records here
+# are additive to the Rich console: they capture the per-page failures the
+# passes below otherwise swallow (reason, model, exception/traceback). Until a
+# run installs a FileHandler, these records go nowhere — harmless.
+_log = logging.getLogger("lawnlord.transcribe")
 
 # Below this many non-whitespace characters, a page's embedded text layer is
 # treated as absent (scanned/image-only) and the page falls through to the
@@ -123,6 +130,16 @@ def transcribe_page(png_path: str | Path, client, model: str = DEFAULT_MODEL) ->
         output_config={"format": {"type": "json_schema", "schema": _OUTPUT_SCHEMA}},
     )
     text = next(b.text for b in resp.content if getattr(b, "type", None) == "text")
+    # A response that ended because it hit max_tokens is truncated: its JSON may
+    # not even close, so a bare json.loads would raise. Salvage any partial
+    # transcription text (mirroring the local tier) and force fidelity to 0.0 —
+    # same handling as the llama.cpp tier's finish_reason=='length' — so the
+    # incomplete reading still lands a row, but below FIDELITY_FLAG_THRESHOLD and
+    # into the flagged-page worklist rather than being silently trusted or dropped.
+    if getattr(resp, "stop_reason", None) == "max_tokens":
+        result = _parse_local_output(text, model)
+        result["fidelity"] = 0.0
+        return result
     data = json.loads(text)
     return {
         "text": data.get("transcription", ""),
@@ -156,8 +173,10 @@ DEFAULT_NUM_CTX = 8192
 #                    be capped; qwen reads the native render fine (best fidelity).
 #   * num_predict — cap on generated tokens. minicpm-v ignores the JSON stop and
 #                    rambles to the context limit, so bound it and salvage the text.
-_DEFAULT_TUNING = {"num_ctx": DEFAULT_NUM_CTX, "max_image_px": None, "num_predict": -1}
-_LOCAL_TUNING = {
+_DEFAULT_TUNING: dict[str, int | None] = {
+    "num_ctx": DEFAULT_NUM_CTX, "max_image_px": None, "num_predict": -1,
+}
+_LOCAL_TUNING: dict[str, dict[str, int | None]] = {
     # Ollama runs the vision projector on CPU (--no-mmproj-offload), so per-page
     # cost is the CPU image-encode and scales ~linearly with image tokens. A
     # 300-DPI page (~4100 tokens) is ~64 s; 1500 px (~1800 tokens) is ~24 s with
@@ -170,7 +189,7 @@ _LOCAL_TUNING = {
 }
 
 
-def _tuning_for(model: str) -> dict:
+def _tuning_for(model: str) -> dict[str, int | None]:
     for prefix, tuning in _LOCAL_TUNING.items():
         if model.startswith(prefix):
             return tuning
@@ -186,7 +205,7 @@ def _b64_png_scaled(path: str | Path, max_px: int | None) -> str:
 
     from PIL import Image
 
-    im = Image.open(path)
+    im: Image.Image = Image.open(path)
     longest = max(im.size)
     if longest <= max_px:
         return _b64_png(path)
@@ -348,6 +367,11 @@ class LlamaCppTranscriber:
         # higher-budget retry instead of silently trusting incomplete output.
         if choice.get("finish_reason") == "length":
             result["fidelity"] = 0.0
+            _log.warning(
+                "llamacpp transcription truncated (finish_reason='length'); "
+                "forcing fidelity=0.0 model=%s png=%s",
+                self.model, png_path,
+            )
         return result
 
 
@@ -361,7 +385,11 @@ def _ollama_tags(host: str | None = None) -> list[dict] | None:
     try:
         with urllib.request.urlopen(f"{host}/api/tags", timeout=3) as resp:
             tags = json.loads(resp.read())
-    except Exception:
+    except Exception as exc:
+        _log.warning(
+            "Ollama unreachable at %s/api/tags (%s: %s); local tier unavailable",
+            host, type(exc).__name__, exc,
+        )
         return None
     return tags.get("models", [])
 
@@ -455,12 +483,27 @@ def _transcribe_with_retry(
         try:
             return transcriber.transcribe(png_path)
         except Exception as exc:
-            if attempt + 1 >= attempts or not _is_transient(exc):
+            transient = _is_transient(exc)
+            if attempt + 1 >= attempts or not transient:
+                # The error propagates to the caller (which records the page in
+                # `failed`); log the exhausted/non-transient cause with model and
+                # page so the file accounts for why this attempt gave up.
+                _log.warning(
+                    "transcribe attempt %d/%d gave up (%s) model=%s png=%s: %s: %s",
+                    attempt + 1, attempts,
+                    "retries exhausted" if transient else "non-transient error",
+                    getattr(transcriber, "model", "?"), png_path,
+                    type(exc).__name__, exc,
+                )
                 raise
             # Exponential backoff with jitter, so concurrent workers don't retry
             # in lockstep against a shared overloaded API.
             delay = base_delay * (2 ** attempt)
             time.sleep(delay * (0.5 + random.random()))
+    # Unreachable for attempts >= 1 (the final iteration always returns or
+    # raises); guards the degenerate attempts <= 0 call and satisfies the
+    # return-type checker.
+    raise ValueError(f"attempts must be >= 1, got {attempts}")
 
 
 def _embedded_text(intake_dir, intake_path, image_id, page_number, cache) -> str | None:
@@ -597,15 +640,20 @@ def transcribe_case(
         with ThreadPoolExecutor(max_workers=workers) as pool:
             future_to_unit = {
                 pool.submit(_transcribe_with_retry, tr, png):
-                    (page_id, case_id, rev)
+                    (page_id, case_id, rev, tr.model)
                 for (page_id, case_id, rev, png, tr) in vision
             }
             for future in as_completed(future_to_unit):
-                page_id, case_id, rev = future_to_unit[future]
+                page_id, case_id, rev, model = future_to_unit[future]
                 try:
                     result = future.result()
-                except Exception:
+                except Exception as exc:
                     failed.append(page_id)
+                    _log.error(
+                        "transcribe failed page_id=%s rev=%s model=%s: %s: %s",
+                        page_id, rev, model, type(exc).__name__, exc,
+                        exc_info=exc,
+                    )
                     continue
                 con.execute(_PAGE_TEXT_INSERT, [_row_id(page_id, "ai", result["model"], rev),
                                       case_id, page_id, rev, "ai", result["text"],
@@ -663,6 +711,10 @@ def escalate_case(
         png = pages_dir / rel
         if not png.exists():
             failed.append(page_id)
+            _log.warning(
+                "escalate skipped page_id=%s model=%s: missing page PNG %s",
+                page_id, cloud_transcriber.model, png,
+            )
             continue
         targets.append((case_id, page_id, rev + 1, png))  # append the next rev
 
@@ -680,8 +732,13 @@ def escalate_case(
                 case_id, page_id, rev = future_to_page[future]
                 try:
                     result = future.result()
-                except Exception:
+                except Exception as exc:
                     failed.append(page_id)
+                    _log.error(
+                        "escalate failed page_id=%s rev=%s model=%s: %s: %s",
+                        page_id, rev, cloud_transcriber.model,
+                        type(exc).__name__, exc, exc_info=exc,
+                    )
                     continue
                 con.execute(_PAGE_TEXT_INSERT, [_row_id(page_id, "ai", result["model"], rev),
                             case_id, page_id, rev, "ai",
@@ -758,7 +815,7 @@ def measure_case(
         avg_fidelity[label] = (sum(vals) / len(vals)) if vals else 0.0
     # Escalation fraction: share of sampled pages a backend reads below each T.
     thresholds = (0.7, 0.8, 0.9, 0.95)
-    escalation_fraction = {label: {} for label in labels}
+    escalation_fraction: dict[str, dict[float, float]] = {label: {} for label in labels}
     n = len(per_page)
     for label in labels:
         for t in thresholds:

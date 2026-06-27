@@ -1,6 +1,6 @@
 # ADR-0002: Local inference runtime & model under 10 GB WSL2
 
-Status: Proposed
+Status: Accepted
 Date: 2026-06-22
 
 ## Context
@@ -44,6 +44,10 @@ the backend talks to Ollama's local HTTP API.
   10 GB for a 7B vision model; more setup than a single-case tool warrants.
 - **llama.cpp directly / transformers + bitsandbytes.** More control, but more
   glue code and weight/GPU management we'd own instead of Ollama.
+  *(Update: a standalone llama.cpp server with the vision projector ON the GPU
+  shipped later as a second local tier — `LlamaCppTranscriber` — because Ollama
+  runs the mmproj on CPU, ~10x slower prefill. Ollama remains the documented
+  default; llama.cpp is an opt-in fast tier, not a replacement.)*
 - **Local OCR (PaddleOCR/docTR) as the primary local tier.** Fits trivially and
   is fast, but the project already established AI transcription is *materially
   more accurate than OCR* (F4 rationale). Reserved at most as a future cheap

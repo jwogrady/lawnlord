@@ -174,7 +174,8 @@ def export_actual(con: duckdb.DuckDBPyConnection) -> dict:
     case = _one(
         con,
         "SELECT id AS number, title, court, case_type AS caseType, status, "
-        "date_filed AS dateFiled, judicial_officer AS judicialOfficer "
+        "date_filed AS dateFiled, judicial_officer AS judicialOfficer, "
+        "source_url AS sourceUrl, last_refreshed AS lastRefreshed "
         "FROM cases LIMIT 1",
     )
 
@@ -188,7 +189,8 @@ def export_actual(con: duckdb.DuckDBPyConnection) -> dict:
         con,
         "SELECT title, filename, intake_path AS intakePath, "
         "declared_page_count AS declaredPageCount, filing_date AS filingDate, "
-        "docket_type AS docketEvent FROM images ORDER BY filing_date, title",
+        "docket_type AS docketEvent, source_url AS sourceUrl "
+        "FROM images ORDER BY filing_date, title",
     )
 
     # The register of actions: every event, in docket order, with the filed

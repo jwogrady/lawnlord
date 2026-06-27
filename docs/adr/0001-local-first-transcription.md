@@ -1,6 +1,6 @@
 # ADR-0001: Local-first transcription with cloud escalation
 
-Status: Proposed
+Status: Accepted
 Date: 2026-06-22
 
 ## Context

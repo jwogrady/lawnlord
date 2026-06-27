@@ -4,6 +4,7 @@ Hermetic: every test builds a tiny intake folder in tmp_path (data.json +
 schema.json + manifest.json + files/), never real case data.
 """
 
+import hashlib
 import json
 import zipfile
 
@@ -123,6 +124,45 @@ def test_load_case_model_maps_data(tmp_path):
     assert len(model.financials.transactions) == 1
 
 
+def test_parse_documents_reads_per_document_url(tmp_path):
+    case = json.loads(json.dumps(_GOOD_CASE))
+    case["documents"][0]["url"] = "https://portal.example/img/doc-1"
+    model = main.load_case_model(_make_intake(tmp_path, case=case))
+    assert model.documents[0].source_url == "https://portal.example/img/doc-1"
+
+
+def test_parse_documents_url_absent_stays_empty(tmp_path):
+    # _GOOD_CASE's document declares no url; it must never be fabricated.
+    model = main.load_case_model(_make_intake(tmp_path))
+    assert model.documents[0].source_url == ""
+
+
+def test_import_persists_image_source_url(tmp_path):
+    case = json.loads(json.dumps(_GOOD_CASE))
+    case["documents"][0]["url"] = "https://portal.example/img/doc-1"
+    intake = _make_intake(tmp_path, case=case)
+    case_dir = tmp_path / "out"
+    main.main(["import", str(intake), "--case-dir", str(case_dir)])
+    con = main.open_case_db(case_dir / "lawnlord.duckdb", read_only=True)
+    try:
+        url = con.execute("SELECT source_url FROM images").fetchone()[0]
+    finally:
+        con.close()
+    assert url == "https://portal.example/img/doc-1"
+
+
+def test_import_image_source_url_null_when_absent(tmp_path):
+    intake = _make_intake(tmp_path)
+    case_dir = tmp_path / "out"
+    main.main(["import", str(intake), "--case-dir", str(case_dir)])
+    con = main.open_case_db(case_dir / "lawnlord.duckdb", read_only=True)
+    try:
+        url = con.execute("SELECT source_url FROM images").fetchone()[0]
+    finally:
+        con.close()
+    assert url is None  # absent → NULL, never a placeholder
+
+
 # --- DuckDB import --------------------------------------------------------
 
 
@@ -217,3 +257,151 @@ def test_import_is_deterministic(tmp_path):
             con.close()
 
     assert dump(a) == dump(b)  # ids + created_at (from capturedAt) identical
+
+
+# --- manifest sha256 verification (#158) ----------------------------------
+
+_PDF_BYTES = b"%PDF-1.4\n%fake petition bytes\n%%EOF"
+
+
+def _make_intake_with_manifest_hashes(tmp_path, *, declared_sha=None, on_disk=_PDF_BYTES):
+    """Like ``_make_intake`` but the manifest declares a per-file sha256 for
+    ``files/doc-1.pdf`` (the document referenced by ``_GOOD_CASE``).
+
+    ``declared_sha`` overrides the declared hash (default: the true hash of the
+    bytes actually written); ``on_disk`` overrides the bytes written to disk.
+    """
+    d = tmp_path / "intake"
+    (d / "files").mkdir(parents=True)
+    (d / "data.json").write_text(json.dumps([_GOOD_CASE]), encoding="utf-8")
+    (d / "schema.json").write_text(json.dumps(_SCHEMA), encoding="utf-8")
+    (d / "files" / "doc-1.pdf").write_bytes(on_disk)
+    sha = declared_sha or hashlib.sha256(on_disk).hexdigest()
+    manifest = {
+        "capturedAt": "2026-06-20T16:42:56Z",
+        "files": [{"path": "files/doc-1.pdf", "sha256": sha, "bytes": len(on_disk)}],
+    }
+    (d / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    return d
+
+
+def test_manifest_declared_hashes_reads_per_file_sha(tmp_path):
+    intake = _make_intake_with_manifest_hashes(tmp_path)
+    declared = main.manifest_declared_hashes(intake)
+    assert declared == {"files/doc-1.pdf": hashlib.sha256(_PDF_BYTES).hexdigest()}
+
+
+def test_manifest_declared_hashes_empty_without_manifest_or_hashes(tmp_path):
+    # No manifest at all.
+    d = tmp_path / "intake"
+    (d / "files").mkdir(parents=True)
+    assert main.manifest_declared_hashes(d) == {}
+    # Manifest present but no per-file hashes (the existing fixture shape).
+    intake = _make_intake(tmp_path / "with_capturedat_only")
+    assert main.manifest_declared_hashes(intake) == {}
+
+
+def test_import_happy_path_when_hashes_match(tmp_path):
+    intake = _make_intake_with_manifest_hashes(tmp_path)
+    case_dir = tmp_path / "out"
+    main.main(["import", str(intake), "--case-dir", str(case_dir)])
+    assert _counts(case_dir)["images"] == 1
+
+
+def test_import_byte_identical_with_or_without_declared_hashes(tmp_path):
+    """When every declared hash matches, ingest output is unchanged vs a
+    manifest with no per-file hashes — ids, counts and created_at preserved."""
+    with_hashes = _make_intake_with_manifest_hashes(tmp_path / "h")
+    without = _make_intake(tmp_path / "n")
+    a, b = tmp_path / "a", tmp_path / "b"
+    main.main(["import", str(with_hashes), "--case-dir", str(a)])
+    main.main(["import", str(without), "--case-dir", str(b)])
+
+    def dump(case_dir):
+        con = main.open_case_db(case_dir / "lawnlord.duckdb", read_only=True)
+        try:
+            return con.execute("SELECT * FROM images ORDER BY 1").fetchall()
+        finally:
+            con.close()
+
+    assert dump(a) == dump(b)
+
+
+def test_import_fails_loud_on_tampered_pdf(tmp_path):
+    # Bytes on disk differ from the manifest-declared hash (tampered/truncated).
+    intake = _make_intake_with_manifest_hashes(
+        tmp_path, declared_sha="deadbeef" * 8
+    )
+    case_dir = tmp_path / "out"
+    with pytest.raises(main.ManifestHashMismatch) as excinfo:
+        main.main(["import", str(intake), "--case-dir", str(case_dir)])
+    message = str(excinfo.value)
+    assert "files/doc-1.pdf" in message
+    assert "deadbeef" * 8 in message  # declared
+    assert hashlib.sha256(_PDF_BYTES).hexdigest() in message  # computed
+    # Aborted before inserting the case row.
+    con = main.open_case_db(case_dir / "lawnlord.duckdb", read_only=True)
+    try:
+        assert con.execute("SELECT count(*) FROM cases").fetchone()[0] == 0
+    finally:
+        con.close()
+
+
+def test_import_fails_loud_when_declared_file_missing(tmp_path):
+    intake = _make_intake_with_manifest_hashes(tmp_path)
+    (intake / "files" / "doc-1.pdf").unlink()  # manifest declares it, disk lacks it
+    case_dir = tmp_path / "out"
+    with pytest.raises(main.ManifestHashMismatch) as excinfo:
+        main.main(["import", str(intake), "--case-dir", str(case_dir)])
+    assert "files/doc-1.pdf" in str(excinfo.value)
+    assert "missing" in str(excinfo.value)
+
+
+def test_import_extra_file_absent_from_manifest_is_reported_not_verified(tmp_path):
+    """A document on disk / in data.json but absent from the manifest is not
+    blocked by verification; it falls through to the existing missing-PDF
+    handling and is reported, never silently treated as verified."""
+    # Manifest declares a *different* file than the one data.json references,
+    # and the referenced PDF is absent from disk.
+    d = tmp_path / "intake"
+    (d / "files").mkdir(parents=True)
+    (d / "data.json").write_text(json.dumps([_GOOD_CASE]), encoding="utf-8")
+    (d / "schema.json").write_text(json.dumps(_SCHEMA), encoding="utf-8")
+    manifest = {
+        "capturedAt": "2026-06-20T16:42:56Z",
+        "files": [{"path": "files/other.pdf", "sha256": "ab" * 32}],
+    }
+    (d / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (d / "files" / "other.pdf").write_bytes(bytes.fromhex("ab" * 32))
+    # The declared file's hash won't match its bytes, so this aborts loud —
+    # proving manifest-declared files are always verified.
+    case_dir = tmp_path / "out"
+    with pytest.raises(main.ManifestHashMismatch):
+        main.main(["import", str(d), "--case-dir", str(case_dir)])
+
+
+def test_import_undeclared_document_skipped_when_pdf_absent(tmp_path):
+    """data.json references files/doc-1.pdf, the manifest declares only an
+    unrelated (present, matching) file, and doc-1.pdf is absent on disk: ingest
+    succeeds and reports doc-1.pdf as a skipped image (deterministic, not
+    silently ignored)."""
+    other_bytes = b"%PDF-1.4\n%other\n%%EOF"
+    d = tmp_path / "intake"
+    (d / "files").mkdir(parents=True)
+    (d / "data.json").write_text(json.dumps([_GOOD_CASE]), encoding="utf-8")
+    (d / "schema.json").write_text(json.dumps(_SCHEMA), encoding="utf-8")
+    (d / "files" / "other.pdf").write_bytes(other_bytes)
+    manifest = {
+        "capturedAt": "2026-06-20T16:42:56Z",
+        "files": [
+            {"path": "files/other.pdf", "sha256": hashlib.sha256(other_bytes).hexdigest()}
+        ],
+    }
+    (d / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    case = main.Case.from_intake(d, case_dir=tmp_path / "out")
+    con = main.open_case_db(case.duckdb_path)
+    main.apply_schema(con)
+    stats = main.ingest_case(con, case, main.captured_at(d))
+    con.close()
+    assert stats["skipped_images"] == ["files/doc-1.pdf"]
+    assert stats["images"] == 0

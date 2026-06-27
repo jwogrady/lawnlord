@@ -21,7 +21,17 @@ import duckdb
 from slugify import slugify
 
 from .hashing import sha256_file
+from .reader import manifest_declared_hashes
 from .workspace import Case
+
+
+class ManifestHashMismatch(Exception):
+    """A filed PDF's freshly computed sha256 did not match the manifest's
+    declared sha256, or a manifest-declared file is missing on disk.
+
+    Raised before any row is inserted so a tampered/truncated/absent file aborts
+    the case's ingest loudly rather than indexing corrupt provenance.
+    """
 
 
 def _event_id(case_id: str, date: str, event: str, used: set[str]) -> str:
@@ -58,11 +68,52 @@ def _clear_case(con: duckdb.DuckDBPyConnection, case_id: str) -> None:
     con.execute("DELETE FROM cases WHERE id = ?", [case_id])
 
 
+def _verify_manifest_hashes(case: Case) -> None:
+    """Fail loud before any row is inserted if a filed PDF's bytes do not match
+    the hash the intake manifest declared for it.
+
+    Provenance contract: the manifest's ``files[].sha256`` is the source of
+    truth for what was captured. For every PDF the manifest declares we compute
+    a fresh sha256 and compare:
+
+    - a mismatch (tampered/truncated bytes) raises :class:`ManifestHashMismatch`
+      naming the file and both hashes;
+    - a manifest-declared file missing on disk raises too — the manifest
+      promised it, so its absence is a corrupt intake, not a silent skip.
+
+    Files on disk / referenced by ``data.json`` but *absent* from the manifest
+    are not verified here; they fall through to ``ingest_case``'s existing
+    missing-PDF handling (reported, never fabricated). When the manifest carries
+    no per-file hashes at all (or there is no manifest), this is a no-op,
+    matching the ``capturedAt`` fallback philosophy.
+    """
+    declared = manifest_declared_hashes(case.intake_dir)
+    if not declared:
+        return
+    for intake_path, declared_sha in sorted(declared.items()):
+        pdf_path = case.intake_dir / intake_path
+        if not pdf_path.exists():
+            raise ManifestHashMismatch(
+                f"manifest declares {intake_path} (sha256 {declared_sha}) but the "
+                f"file is missing on disk at {pdf_path}"
+            )
+        computed = sha256_file(pdf_path)
+        if computed != declared_sha:
+            raise ManifestHashMismatch(
+                f"sha256 mismatch for {intake_path}: manifest declared "
+                f"{declared_sha} but computed {computed} — refusing to ingest "
+                "tampered or truncated bytes"
+            )
+
+
 def ingest_case(con: duckdb.DuckDBPyConnection, case: Case, generated_at: str) -> dict:
     """Ingest the docket metadata for ``case``. Returns row counts.
 
-    Documents whose source PDF is missing (cannot be hashed) are skipped and
-    reported in the returned ``skipped_images`` list rather than inserted
+    Before inserting anything, every PDF the intake manifest declares is hashed
+    and compared to the manifest-declared sha256; a mismatch (or a declared file
+    missing on disk) raises :class:`ManifestHashMismatch` and aborts the case's
+    ingest. Documents whose source PDF is missing (cannot be hashed) are skipped
+    and reported in the returned ``skipped_images`` list rather than inserted
     with a fabricated hash.
     """
     # The zip is the deterministic single source; the model is consumed as-is
@@ -70,6 +121,9 @@ def ingest_case(con: duckdb.DuckDBPyConnection, case: Case, generated_at: str) -
     model = case.model
     ident = model.identity
     case_id = ident.case_number or case.case_slug
+    # Verify provenance before any write so a tampered/missing file aborts the
+    # whole case rather than leaving a partially-inserted, corrupt row set.
+    _verify_manifest_hashes(case)
     _clear_case(con, case_id)
 
     con.execute(
@@ -164,13 +218,13 @@ def ingest_case(con: duckdb.DuckDBPyConnection, case: Case, generated_at: str) -
             INSERT INTO images (id, case_id, filename, title, intake_path,
                                 docket_type, filing_date, declared_page_count,
                                 actual_page_count, page_count_mismatch,
-                                sha256_hash, needs_review, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, NULL, ?)
+                                sha256_hash, needs_review, source_url, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, NULL, ?, ?)
             """,
             [
                 image_id, case_id, doc.filename, doc.title, doc.intake_path,
                 doc.docket_event, doc.filing_date, doc.declared_page_count,
-                sha, generated_at,
+                sha, doc.source_url or None, generated_at,
             ],
         )
 
@@ -178,13 +232,13 @@ def ingest_case(con: duckdb.DuckDBPyConnection, case: Case, generated_at: str) -
     used_links: set[tuple[str, str]] = set()
     for event_id, files in event_files:
         for intake_path in files:
-            image_id = path_to_image.get(intake_path)
-            if image_id is None or (image_id, event_id) in used_links:
+            linked_image = path_to_image.get(intake_path)
+            if linked_image is None or (linked_image, event_id) in used_links:
                 continue
-            used_links.add((image_id, event_id))
+            used_links.add((linked_image, event_id))
             con.execute(
                 "INSERT INTO image_events (image_id, event_id) VALUES (?, ?)",
-                [image_id, event_id],
+                [linked_image, event_id],
             )
 
     return {

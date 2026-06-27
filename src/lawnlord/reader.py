@@ -97,6 +97,35 @@ def validate_data(intake_dir: str | Path) -> list:
     return data
 
 
+def manifest_declared_hashes(intake_dir: str | Path) -> dict[str, str]:
+    """Map intake path → declared sha256 from ``manifest.json`` ``files[]``.
+
+    Each filed PDF in the manifest carries a ``path`` (e.g.
+    ``files/doc-24702155.pdf``) and a ``sha256``. This returns only the entries
+    that declare both, keyed by intake path — the contract ingest verifies the
+    freshly computed hash against.
+
+    Returns ``{}`` when there is no manifest, or a manifest with no per-file
+    hashes — matching the ``capturedAt`` fallback philosophy: a legitimate
+    manifest-less intake is not blocked, verification is simply skipped.
+    """
+    path = Path(intake_dir) / MANIFEST_FILENAME
+    if not path.exists():
+        return {}
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict):
+        return {}
+    out: dict[str, str] = {}
+    for entry in manifest.get("files") or []:
+        if not isinstance(entry, dict):
+            continue
+        file_path = entry.get("path")
+        sha = entry.get("sha256")
+        if file_path and sha:
+            out[str(file_path)] = str(sha)
+    return out
+
+
 def captured_at(intake_dir: str | Path) -> str:
     """The zip's capture timestamp (``manifest.json`` ``capturedAt``) — used as a
     deterministic ``generated_at`` so re-imports are reproducible. Falls back to a
@@ -163,6 +192,7 @@ def _parse_documents(raw: list | None) -> tuple[DocumentRef, ...]:
             declared_page_count=_page_count(d.get("Page Count")),
             docket_event=d.get("event", ""),
             filing_date=d.get("date", ""),
+            source_url=d.get("url", "") or "",
         )
     return tuple(by_path[p] for p in sorted(by_path))
 

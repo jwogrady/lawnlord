@@ -35,10 +35,10 @@ _SCHEMA = {
 }
 
 
-def _import(tmp_path):
+def _import(tmp_path, case=None):
     d = tmp_path / "intake"
     (d / "files").mkdir(parents=True)
-    (d / "data.json").write_text(json.dumps([_CASE]), encoding="utf-8")
+    (d / "data.json").write_text(json.dumps([case or _CASE]), encoding="utf-8")
     (d / "schema.json").write_text(json.dumps(_SCHEMA), encoding="utf-8")
     (d / "manifest.json").write_text(json.dumps({"capturedAt": "2026-01-01T00:00:00Z"}), encoding="utf-8")
     (d / "files" / "doc-1.pdf").write_bytes(b"%PDF-1.4\n%x\n%%EOF")
@@ -67,6 +67,36 @@ def test_export_actual_shape(tmp_path):
     with_docs = [e for e in roa if e["documents"]]
     assert len(with_docs) == 1
     assert with_docs[0]["documents"][0]["filename"] == "doc-1.pdf"
+
+
+def test_export_actual_carries_source_url_provenance(tmp_path):
+    case = json.loads(json.dumps(_CASE))
+    case["documents"][0]["url"] = "https://portal.example/img/doc-1"
+    case_dir = _import(tmp_path, case=case)
+    con = main.open_case_db(case_dir / "lawnlord.duckdb", read_only=True)
+    try:
+        payload = main.export_actual(con)
+    finally:
+        con.close()
+    # The case header exposes the existing case-level provenance columns so the
+    # viewer can show where the case came from (mapped elsewhere; here just that
+    # the keys are returned, not omitted).
+    assert "sourceUrl" in payload["case"]
+    assert "lastRefreshed" in payload["case"]
+    # Each document carries its own source URL.
+    assert payload["documents"][0]["sourceUrl"] == "https://portal.example/img/doc-1"
+
+
+def test_export_actual_document_without_url_exports_null(tmp_path):
+    case_dir = _import(tmp_path)  # _CASE's document declares no url
+    con = main.open_case_db(case_dir / "lawnlord.duckdb", read_only=True)
+    try:
+        payload = main.export_actual(con)
+    finally:
+        con.close()
+    doc = payload["documents"][0]
+    assert "sourceUrl" in doc  # present, not omitted
+    assert doc["sourceUrl"] is None  # null, not a placeholder
 
 
 def test_export_actual_cli_emits_json(tmp_path, capsys):

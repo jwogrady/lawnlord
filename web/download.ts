@@ -25,9 +25,10 @@
 // rejected before any read. Bundle members are confined the same way.
 
 import { mkdtemp, rm } from "node:fs/promises";
-import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve, basename } from "node:path";
+import { join, basename } from "node:path";
+
+import { safeJoin, pngRoot as pngRootFor, pdfRoot as pdfRootFor } from "./paths";
 
 export interface DownloadConfig {
 	caseDir: string;
@@ -70,38 +71,16 @@ interface Image {
 }
 
 // --- path safety ------------------------------------------------------------
-
-/**
- * Resolve `rel` under `root` and confine it there. Returns the absolute path
- * only if it stays inside `root` after symlink resolution; otherwise null.
- * `root` itself is realpath'd so a symlinked case dir is handled correctly.
- */
-function safeJoin(root: string, rel: string): string | null {
-	// Reject obvious escapes early (an absolute rel would override the join).
-	if (rel.includes("\0")) return null;
-	const realRoot = realpathSync(resolve(root));
-	const candidate = resolve(realRoot, rel);
-	// Lexical confinement first (catches `..` even when the file is missing).
-	if (candidate !== realRoot && !candidate.startsWith(realRoot + "/")) {
-		return null;
-	}
-	// Symlink confinement: if the path exists, its realpath must also be inside.
-	try {
-		const real = realpathSync(candidate);
-		if (real !== realRoot && !real.startsWith(realRoot + "/")) return null;
-		return real;
-	} catch {
-		// Path doesn't exist yet — lexical check already passed; let the read 404.
-		return candidate;
-	}
-}
+//
+// `safeJoin` and the root helpers live in ./paths and are shared with the
+// static file handlers in index.ts so the traversal guard can't drift (#145).
 
 function pngRoot(cfg: DownloadConfig): string {
-	return join(cfg.caseDir, "extracted", "pages");
+	return pngRootFor(cfg.caseDir);
 }
 
 function pdfRoot(cfg: DownloadConfig): string {
-	return join(cfg.intakeDir, "files");
+	return pdfRootFor(cfg.intakeDir);
 }
 
 // --- export access ----------------------------------------------------------
