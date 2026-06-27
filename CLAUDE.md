@@ -103,9 +103,10 @@ Has its own `web/CLAUDE.md` (Bun conventions). It reads the case **only** throug
 exports (`uv run lawnlord export-*`) and serves PDFs + captured `pages/*.html` — it never re-parses the
 zip or touches DuckDB directly. Use Bun, not Node/npm.
 
-## Docs caveat
+## Docs as ground truth
 
-The ADRs (`docs/adr/0001`–`0009`) and `CHANGELOG.md` track the current design. But `README.md` and
-`docs/architecture.md` lag the code — they describe an earlier "alpha rebuild" where `import` and the
-reader weren't wired and the schema was v6. **The code is the ground truth** (schema is v10; the full
-import→explode→transcribe→export pipeline exists). If you touch those docs, reconcile them to the code.
+The ADRs (`docs/adr/0001`–`0009`), `CHANGELOG.md`, `README.md`, `docs/architecture.md`,
+`docs/schema.md`, and `docs/ux.md` were reconciled to the shipped code in PR #164 and track the
+current design. The **code remains ground truth**: `src/lawnlord/db.py` (`SCHEMA_VERSION`) is
+authoritative for the schema — if you bump it, update `docs/schema.md` and `docs/architecture.md`
+in the same change.

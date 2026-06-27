@@ -6,6 +6,10 @@ them — passing `OLLAMA_*` to the CLI does nothing.
 
 Targets a single 10 GB RTX 3080 running the lawnlord model-major transcribe.
 
+> Note: `NUM_PARALLEL=6` here is specific to this 10 GB RTX 3080 (a GPU case). It differs from
+> `scripts/ollama-override.conf` (`NUM_PARALLEL=1`, the Ryzen CPU-projector case) by hardware
+> target, not by contradiction. See `docs/reference/multi-machine-setup.md` for the per-machine model.
+
 | Env var | Value | Why |
 |---|---|---|
 | `OLLAMA_NUM_PARALLEL` | `6` | Six requests batched concurrently — keeps the SMs fed without overcommitting VRAM. Measured: 8 slots × 8192 ctx = 65,536-token KV cache pushed ~2 GB past the 10 GB card and Ollama offloaded 17% of the model to CPU (slower). 6 is the most that stays 100% GPU here; confirm with `ollama ps` showing `100% GPU`. If it still spills, drop to 4. |
