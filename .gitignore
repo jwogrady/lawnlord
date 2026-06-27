@@ -5,6 +5,9 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 
+# Local run scratch (transcribe logs written next to the repo root)
+scratchpad_*.log
+
 # Environments / build
 .venv/
 venv/
