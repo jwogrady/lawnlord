@@ -50,6 +50,8 @@ lawnlord = "lawnlord.cli:main"
 dev = [
     "pytest>=8.0",
     "pypdf>=4.0",
+    "mypy>=2.1.0",
+    "types-jsonschema>=4.26.0.20260518",
 ]
 
 [build-system]
@@ -62,3 +64,43 @@ packages = ["src/lawnlord"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+# Slow/optional acceptance tests are excluded from the default fast run; opt in
+# with `pytest -m slow` (they round-trip the real 17 MB court-export fixture).
+addopts = "-m 'not slow'"
+markers = [
+    "slow: real-fixture acceptance tests excluded from the default fast run (run with `pytest -m slow`)",
+]
+
+[tool.ruff]
+line-length = 99
+# scripts/cosmic/*.py (bench.py, dump.py) are vaulted live-environment tooling,
+# preserved byte-identical from the C:\ai AMD/Vulkan workbench as benchmark
+# evidence. Nothing in src/ imports them; their terse one-liner style is not
+# maintained package code, so exclude them from lint rather than rewrite the
+# captured artifacts. src/, tests/, and web/ stay linted.
+extend-exclude = ["scripts/cosmic"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+
+# Static type checking. Run with: `uv run mypy src/lawnlord`
+#
+# Strictness: this is a LENIENT BASELINE — mypy's defaults, which check
+# annotated code but do not force annotations on every function. It passes at
+# zero errors today. The intended ratchet direction is UP: tighten toward
+# `strict = true` (or incrementally enable disallow_untyped_defs,
+# warn_return_any, etc.) as modules gain annotations. Do not loosen below this.
+[tool.mypy]
+files = ["src/lawnlord"]
+python_version = "3.13"
+# Stable, low-noise floor on top of the defaults.
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unused_configs = true
+
+# Untyped third-party libraries without stubs or a py.typed marker. Scoped
+# per-module rather than globally so a real typo'd import elsewhere still errors.
+# (jsonschema is handled by the installed `types-jsonschema` stub package.)
+[[tool.mypy.overrides]]
+module = ["pypdfium2"]
+ignore_missing_imports = true

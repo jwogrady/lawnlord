@@ -45,7 +45,12 @@ import duckdb
 # row's stable id (`anchor_kind`/`anchor_id`: a `page_text` variation today, an
 # analysis entity later). Populated from PDF geometry for born-digital pages;
 # never fabricated. Additive: references pages/page_text, never mutates them.
-SCHEMA_VERSION = 11
+# v12 (#155): `images.source_url` — the per-file portal URL the intake manifest
+# recorded for each filed PDF (data.json document `url`), so the Actual export
+# can report where each image came from. NULL/"" when the intake declares no URL;
+# never fabricated. The case-level provenance (`cases.source_url`/`last_refreshed`)
+# already existed; this extends it to the leaf. Regenerable: re-run the import.
+SCHEMA_VERSION = 12
 
 # One statement per table; CREATE ... IF NOT EXISTS keeps apply_schema idempotent.
 _SCHEMA_STATEMENTS = (
@@ -129,6 +134,7 @@ _SCHEMA_STATEMENTS = (
         page_count_mismatch BOOLEAN,
         sha256_hash TEXT NOT NULL,
         needs_review BOOLEAN,
+        source_url TEXT,
         created_at TEXT
     )
     """,
@@ -211,6 +217,26 @@ _SCHEMA_STATEMENTS = (
 )
 
 
+class CaseDatabaseBusy(RuntimeError):
+    """Another OS process holds DuckDB's single-writer lock on the case file.
+
+    DuckDB allows at most one read-write process per database file, and a read
+    *or* write open is refused while a writer holds the lock (see ADR-0003 and
+    docs/architecture.md). This is *contention*, not a missing/corrupt file: the
+    fix is to let the other lawnlord run finish, not to regenerate the DB."""
+
+
+# DuckDB's file-lock IOException carries this phrase; matching it lets us turn
+# the raw cross-process lock error into a friendly, actionable message while
+# letting a genuinely missing/corrupt-file IOException surface unchanged.
+_LOCK_MARKERS = ("Could not set lock on file", "Conflicting lock is held")
+
+
+def _is_lock_contention(exc: Exception) -> bool:
+    message = str(exc)
+    return any(marker in message for marker in _LOCK_MARKERS)
+
+
 def open_case_db(
     path: str | Path, read_only: bool = False
 ) -> duckdb.DuckDBPyConnection:
@@ -218,23 +244,63 @@ def open_case_db(
 
     Read-write by default (creating the file and parent dirs if needed);
     pass ``read_only=True`` for queries, which requires an existing database.
-    """
+
+    DuckDB enforces a single read-write process per case file, and refuses a
+    read-only open too while a writer holds the lock. When that happens we raise
+    :class:`CaseDatabaseBusy` with the case path and likely cause, instead of
+    leaking DuckDB's raw ``IOException`` / traceback. A genuinely missing or
+    corrupt file still surfaces as its original error (it is not contention)."""
     path = Path(path)
-    if read_only:
-        if not path.exists():
-            raise FileNotFoundError(f"case database not found: {path}")
-        return duckdb.connect(str(path), read_only=True)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return duckdb.connect(str(path))
+    try:
+        if read_only:
+            if not path.exists():
+                raise FileNotFoundError(f"case database not found: {path}")
+            return duckdb.connect(str(path), read_only=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return duckdb.connect(str(path))
+    except duckdb.IOException as exc:
+        if not _is_lock_contention(exc):
+            raise
+        mode = "read" if read_only else "write"
+        raise CaseDatabaseBusy(
+            f"case database is busy: {path}\n"
+            f"  Another lawnlord process is writing this case, and DuckDB allows "
+            f"only one read-write process per case file (a {mode} open is refused "
+            f"while a writer holds the lock).\n"
+            f"  Wait for the other run (import/explode/transcribe/regions) to "
+            f"finish, then retry. The file is not corrupt — this is lock "
+            f"contention, not a missing database."
+        ) from exc
+
+
+class SchemaVersionMismatch(RuntimeError):
+    """A per-case DB was stamped by a different ``SCHEMA_VERSION`` than the code
+    opening it. The DB is a regenerable index, so the fix is always to regenerate
+    it (re-run the import) — never to silently proceed against a stale schema."""
 
 
 def apply_schema(con: duckdb.DuckDBPyConnection) -> None:
-    """Apply the versioned M1 schema. Idempotent: running twice is a no-op."""
+    """Apply the versioned M1 schema. Idempotent: running twice is a no-op.
+
+    Refuses to proceed if the DB was stamped by a different ``SCHEMA_VERSION``
+    (older or newer): a per-case DB is a derived index, so a mismatch means the
+    operator must regenerate it (re-run the import) rather than risk
+    misreporting provenance against a stale schema.
+    """
     for statement in _SCHEMA_STATEMENTS:
         con.execute(statement)
-    row = con.execute("SELECT count(*) FROM schema_meta").fetchone()
-    if row[0] == 0:
+    row = con.execute("SELECT version FROM schema_meta").fetchone()
+    if row is None:
         con.execute("INSERT INTO schema_meta (version) VALUES (?)", [SCHEMA_VERSION])
+        return
+    stored = row[0]
+    if stored != SCHEMA_VERSION:
+        raise SchemaVersionMismatch(
+            f"schema version mismatch: this database was stamped v{stored}, "
+            f"but the code expects v{SCHEMA_VERSION}. Per-case databases are a "
+            "regenerable index — regenerate this one (re-run the import) instead "
+            "of opening it with mismatched code."
+        )
 
 
 def load_fts(con: duckdb.DuckDBPyConnection) -> bool:

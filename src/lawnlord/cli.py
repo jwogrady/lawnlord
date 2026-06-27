@@ -17,15 +17,20 @@ import argparse
 import os
 import shutil
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from rich.table import Table
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 from .console import console
-from .db import apply_schema, open_case_db
+from .db import CaseDatabaseBusy, apply_schema, open_case_db
 from .explode import explode_case
 from .export import export_actual, export_exploded, export_metrics, export_regions
 from .ingest import ingest_case
 from .intake import load_intake, scaffold
+from .logging_setup import setup_run_logging
 from .reader import captured_at, extract_zip, find_intake_dir
 from .regions import capture_pdf_regions
 from .transcribe import (
@@ -220,6 +225,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="After the pass, re-transcribe model pages with fidelity < T on cloud "
         "Claude (appends a revision; needs ANTHROPIC_API_KEY). E.g. 0.9",
     )
+    p_transcribe.add_argument(
+        "--log-level", default=None, metavar="LEVEL",
+        help="Level for the per-run log file under <case-dir>/logs/ (DEBUG, INFO, "
+        "WARNING, ERROR). Overrides the LAWNLORD_LOG_LEVEL env var; defaults to INFO. "
+        "Does not change the console output.",
+    )
 
     p_measure = sub.add_parser(
         "measure",
@@ -319,12 +330,302 @@ def _load_dotenv() -> None:
     load_dotenv(dotenv_path=Path.cwd() / ".env", override=False)
 
 
+# --- Per-command handlers ---------------------------------------------------
+#
+# Each handler takes the parsed argparse Namespace and performs exactly one
+# subcommand's work. They are wired into COMMANDS below; _main looks up the
+# handler for args.command and invokes it. Splitting the former if/elif chain
+# into named functions keeps each unit small and independently testable, and
+# makes the command-to-handler seam explicit (ADR/issue #147).
+
+
+def _cmd_start(args: argparse.Namespace) -> None:
+    touched = scaffold(args.root, force=args.force)
+    intake = load_intake(args.root)
+    if touched:
+        console.print("[bold]Scaffolded intake:[/]")
+        for path in touched:
+            console.print(f"  + {path}")
+    else:
+        console.print("[yellow]Intake already scaffolded; nothing to create.[/]")
+    console.print(
+        f"Drop the intake zip in [bold]{intake.intake_dir}[/]."
+    )
+
+
+def _cmd_import(args: argparse.Namespace) -> None:
+    case_dir = Path(args.case_dir).resolve() if args.case_dir else Path.cwd()
+    source = Path(args.source)
+    # The intake is always materialized under <case-dir>/intake/<name> so the
+    # case is self-contained (explode and the viewer resolve it from there).
+    # A zip is extracted safely; an already-extracted dir is copied in.
+    if source.is_dir():
+        intake_dir = case_dir / "intake" / source.name
+        if source.resolve() != intake_dir:
+            shutil.copytree(source, intake_dir, dirs_exist_ok=True)
+    else:
+        intake_dir = case_dir / "intake" / source.stem
+        extract_zip(source, intake_dir)
+    case = Case.from_intake(intake_dir, case_dir=case_dir)
+    con = open_case_db(case.duckdb_path)
+    try:
+        apply_schema(con)
+        stats = ingest_case(con, case, captured_at(intake_dir))
+    finally:
+        # Close even when ingest aborts loud (e.g. a manifest hash mismatch)
+        # so the connection never leaks and the DB is reopenable.
+        con.close()
+    table = Table(title="Imported case (zip → DuckDB mirror)")
+    table.add_column("Metric")
+    table.add_column("Value", justify="right")
+    table.add_row("Case", case.case_number)
+    table.add_row("Parties", str(stats["parties"]))
+    table.add_row("Events", str(stats["events"]))
+    table.add_row("Images (filed PDFs)", str(stats["images"]))
+    table.add_row("Image↔event links", str(stats["image_events"]))
+    table.add_row("DuckDB", str(case.duckdb_path))
+    console.print(table)
+    if stats["skipped_images"]:
+        console.print(
+            f"[yellow]Skipped (no source PDF):[/] {len(stats['skipped_images'])}"
+        )
+    console.print("[green]Done.[/]")
+
+
+def _cmd_export_actual(args: argparse.Namespace) -> None:
+    # Emit ONLY JSON on stdout so the viewer can parse it; the data comes
+    # from the DuckDB mirror, read-only.
+    import json
+
+    con = open_case_db(Path(args.case_dir) / "lawnlord.duckdb", read_only=True)
+    try:
+        print(json.dumps(export_actual(con)))
+    finally:
+        con.close()
+
+
+def _cmd_export_exploded(args: argparse.Namespace) -> None:
+    import json
+
+    con = open_case_db(Path(args.case_dir) / "lawnlord.duckdb", read_only=True)
+    try:
+        print(json.dumps(export_exploded(
+            con,
+            filing_id=args.filing,
+            image_id=args.image,
+            document_id=args.document,
+            page_id=args.page,
+        )))
+    finally:
+        con.close()
+
+
+def _cmd_export_metrics(args: argparse.Namespace) -> None:
+    import json
+
+    con = open_case_db(Path(args.case_dir) / "lawnlord.duckdb", read_only=True)
+    try:
+        print(json.dumps(export_metrics(con, image_id=args.image)))
+    finally:
+        con.close()
+
+
+def _cmd_export_regions(args: argparse.Namespace) -> None:
+    import json
+
+    con = open_case_db(Path(args.case_dir) / "lawnlord.duckdb", read_only=True)
+    try:
+        print(json.dumps(export_regions(con, page_id=args.page)))
+    finally:
+        con.close()
+
+
+def _cmd_explode(args: argparse.Namespace) -> None:
+    case_dir = Path(args.case_dir).resolve()
+    intake_dir = find_intake_dir(case_dir)
+    out_dir = case_dir / "extracted" / "pages"
+    con = open_case_db(case_dir / "lawnlord.duckdb")
+    apply_schema(con)
+    stats = explode_case(con, intake_dir, out_dir, captured_at(intake_dir), dpi=args.dpi)
+    con.close()
+    table = Table(title="Exploded (filed PDFs → documents + page PNGs)")
+    table.add_column("Metric")
+    table.add_column("Value", justify="right")
+    table.add_row("Documents", str(stats["documents"]))
+    table.add_row("Pages rendered", str(stats["pages"]))
+    table.add_row("PNGs", str(out_dir))
+    console.print(table)
+    for m in stats["mismatches"]:
+        console.print(
+            f"[yellow]Page-count mismatch:[/] {m['image_id']} "
+            f"declared {m['declared']} vs rendered {m['rendered']}"
+        )
+    if stats["skipped_images"]:
+        console.print(f"[yellow]Skipped (no source PDF):[/] {len(stats['skipped_images'])}")
+    console.print("[green]Done.[/]")
+
+
+def _cmd_regions(args: argparse.Namespace) -> None:
+    case_dir = Path(args.case_dir).resolve()
+    intake_dir = find_intake_dir(case_dir)
+    con = open_case_db(case_dir / "lawnlord.duckdb")
+    apply_schema(con)
+    stats = capture_pdf_regions(con, intake_dir, captured_at(intake_dir))
+    con.close()
+    table = Table(title="Spatial anchors (PDF geometry → boxes per span)")
+    table.add_column("Metric")
+    table.add_column("Value", justify="right")
+    table.add_row("Regions captured", str(stats["regions"]))
+    table.add_row("Pages with geometry", str(stats["pages_with_geometry"]))
+    console.print(table)
+    if stats["skipped_no_pdf"]:
+        console.print(
+            f"[yellow]Skipped (no source PDF / page):[/] {len(stats['skipped_no_pdf'])}"
+        )
+    if stats["skipped_mismatch"]:
+        console.print(
+            f"[yellow]Skipped (text/geometry mismatch — not fabricated):[/] "
+            f"{len(stats['skipped_mismatch'])}"
+        )
+    console.print("[green]Done.[/]")
+
+
+def _cmd_transcribe(args: argparse.Namespace) -> None:
+    case_dir = Path(args.case_dir).resolve()
+    # Per-run file log (additive to the Rich console): captures the per-page
+    # failures the passes below otherwise swallow. Lands under <case-dir>/logs/.
+    log_path = setup_run_logging(case_dir, level=args.log_level)
+    ollama_host = args.ollama_host or os.environ.get("OLLAMA_HOST")
+    transcribers = _build_transcribers(args.backend, args.model, ollama_host,
+                                        args.max_image_px, args.llamacpp_host)
+    if not transcribers:
+        return
+    has_local = any(isinstance(t, (LocalTranscriber, LlamaCppTranscriber))
+                    for t in transcribers)
+    pages_dir = case_dir / "extracted" / "pages"
+    con = open_case_db(case_dir / "lawnlord.duckdb")
+    apply_schema(con)
+    intake_dir = find_intake_dir(case_dir)
+    generated_at = captured_at(intake_dir)
+    stats = transcribe_case(
+        con, pages_dir, generated_at, transcribers,
+        force=args.force, intake_dir=intake_dir, max_workers=args.workers,
+    )
+    # Fidelity-gated escalation: re-transcribe the local tier's weakest pages
+    # on cloud Claude (ADR-0001). Only meaningful when a local model ran.
+    esc = None
+    if args.escalate_below is not None:
+        if not has_local:
+            console.print(
+                "[yellow]--escalate-below applies to local models[/] "
+                "(this pass had none); skipping escalation."
+            )
+        elif not os.environ.get("ANTHROPIC_API_KEY"):
+            console.print(
+                "[yellow]--escalate-below needs ANTHROPIC_API_KEY[/] for the "
+                "cloud pass; skipping escalation."
+            )
+        else:
+            esc = escalate_case(
+                con, pages_dir, generated_at, CloudTranscriber(make_client()),
+                args.escalate_below, max_workers=args.workers,
+            )
+    con.close()
+    models = ", ".join(t.model for t in transcribers)
+    table = Table(title="Transcribed (PDF text layer + every vision model)")
+    table.add_column("Metric")
+    table.add_column("Value", justify="right")
+    table.add_row("Vision models", models)
+    table.add_row("Pages from PDF text layer", str(stats["pdf_text"]))
+    table.add_row("Pages transcribed (vision)", str(stats["pages"]))
+    table.add_row("Skipped (already transcribed)", str(len(stats["skipped_existing"])))
+    table.add_row("Avg fidelity (vision)", f"{stats['avg_fidelity']:.2f}")
+    if esc is not None:
+        table.add_row(
+            f"Escalated to cloud (fidelity < {args.escalate_below})",
+            f"{esc['escalated']} of {esc['candidates']}",
+        )
+    console.print(table)
+    if stats["skipped"]:
+        console.print(f"[yellow]Skipped (no PNG):[/] {len(stats['skipped'])}")
+    if stats["failed"]:
+        console.print(
+            f"[red]Failed (vision error after retries):[/] {len(stats['failed'])} "
+            f"— see {log_path}"
+        )
+    console.print("[green]Done.[/]")
+
+
+def _cmd_measure(args: argparse.Namespace) -> None:
+    case_dir = Path(args.case_dir).resolve()
+    transcribers: dict = {}
+    host = args.ollama_host or os.environ.get("OLLAMA_HOST")
+    for m in (s.strip() for s in args.models.split(",") if s.strip()):
+        if ollama_available(m, host):
+            transcribers[m] = LocalTranscriber(model=m, host=host)
+        else:
+            console.print(f"[yellow]Skipping[/] local model '{m}' (not pulled/reachable).")
+    if args.cloud:
+        if os.environ.get("ANTHROPIC_API_KEY"):
+            transcribers[f"cloud:{DEFAULT_MODEL}"] = CloudTranscriber(make_client())
+        else:
+            console.print("[yellow]--cloud set but no ANTHROPIC_API_KEY[/] — omitting cloud.")
+    if not transcribers:
+        console.print("[red]No backends available to measure.[/]")
+        raise SystemExit(1)
+    pages_dir = case_dir / "extracted" / "pages"
+    con = open_case_db(case_dir / "lawnlord.duckdb", read_only=True)
+    intake_dir = find_intake_dir(case_dir)
+    try:
+        result = measure_case(con, pages_dir, transcribers, sample=args.sample,
+                              intake_dir=intake_dir)
+    finally:
+        con.close()
+    labels = result["labels"]
+    table = Table(title=f"Backend comparison ({result['sampled']} image-only pages)")
+    table.add_column("Backend")
+    table.add_column("Avg fidelity", justify="right")
+    for t in (0.7, 0.8, 0.9, 0.95):
+        table.add_column(f"<{t}", justify="right")
+    for label in labels:
+        row = [label, f"{result['avg_fidelity'][label]:.3f}"]
+        row += [f"{result['escalation_fraction'][label][t]:.0%}" for t in (0.7, 0.8, 0.9, 0.95)]
+        table.add_row(*row)
+    console.print(table)
+    console.print(
+        "[dim]Columns <T = share of sampled pages that backend reads below "
+        "fidelity T (the fraction that would escalate at that threshold).[/]"
+    )
+
+
+# Command name -> handler. The subparser's ``dest="command"`` value indexes
+# this map; every name registered here has a matching subparser in
+# build_parser() (and vice versa).
+COMMANDS: dict[str, "Callable[[argparse.Namespace], None]"] = {
+    "start": _cmd_start,
+    "import": _cmd_import,
+    "export-actual": _cmd_export_actual,
+    "export-exploded": _cmd_export_exploded,
+    "export-metrics": _cmd_export_metrics,
+    "export-regions": _cmd_export_regions,
+    "explode": _cmd_explode,
+    "regions": _cmd_regions,
+    "transcribe": _cmd_transcribe,
+    "measure": _cmd_measure,
+}
+
+
 def main(argv: list[str] | None = None) -> None:
     """Entry point. Report known input errors cleanly (a clear message and exit
     1, no traceback); let unexpected errors surface for debugging."""
     _load_dotenv()
     try:
         _main(argv)
+    except CaseDatabaseBusy as exc:
+        # Lock contention: exit non-zero with the friendly message so a blocked
+        # run is never mistaken for a completed one.
+        console.print(f"[red]Database busy:[/] {exc}")
+        raise SystemExit(1) from None
     except (FileNotFoundError, ValueError) as exc:
         console.print(f"[red]Error:[/] {exc}")
         raise SystemExit(1) from None
@@ -332,254 +633,4 @@ def main(argv: list[str] | None = None) -> None:
 
 def _main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
-
-    if args.command == "start":
-        touched = scaffold(args.root, force=args.force)
-        intake = load_intake(args.root)
-        if touched:
-            console.print("[bold]Scaffolded intake:[/]")
-            for path in touched:
-                console.print(f"  + {path}")
-        else:
-            console.print("[yellow]Intake already scaffolded; nothing to create.[/]")
-        console.print(
-            f"Drop the intake zip in [bold]{intake.intake_dir}[/]."
-        )
-        return
-
-    if args.command == "import":
-        case_dir = Path(args.case_dir).resolve() if args.case_dir else Path.cwd()
-        source = Path(args.source)
-        # The intake is always materialized under <case-dir>/intake/<name> so the
-        # case is self-contained (explode and the viewer resolve it from there).
-        # A zip is extracted safely; an already-extracted dir is copied in.
-        if source.is_dir():
-            intake_dir = case_dir / "intake" / source.name
-            if source.resolve() != intake_dir:
-                shutil.copytree(source, intake_dir, dirs_exist_ok=True)
-        else:
-            intake_dir = case_dir / "intake" / source.stem
-            extract_zip(source, intake_dir)
-        case = Case.from_intake(intake_dir, case_dir=case_dir)
-        con = open_case_db(case.duckdb_path)
-        apply_schema(con)
-        stats = ingest_case(con, case, captured_at(intake_dir))
-        con.close()
-        table = Table(title="Imported case (zip → DuckDB mirror)")
-        table.add_column("Metric")
-        table.add_column("Value", justify="right")
-        table.add_row("Case", case.case_number)
-        table.add_row("Parties", str(stats["parties"]))
-        table.add_row("Events", str(stats["events"]))
-        table.add_row("Images (filed PDFs)", str(stats["images"]))
-        table.add_row("Image↔event links", str(stats["image_events"]))
-        table.add_row("DuckDB", str(case.duckdb_path))
-        console.print(table)
-        if stats["skipped_images"]:
-            console.print(
-                f"[yellow]Skipped (no source PDF):[/] {len(stats['skipped_images'])}"
-            )
-        console.print("[green]Done.[/]")
-        return
-
-    if args.command == "export-actual":
-        # Emit ONLY JSON on stdout so the viewer can parse it; the data comes
-        # from the DuckDB mirror, read-only.
-        import json
-
-        con = open_case_db(Path(args.case_dir) / "lawnlord.duckdb", read_only=True)
-        try:
-            print(json.dumps(export_actual(con)))
-        finally:
-            con.close()
-        return
-
-    if args.command == "export-exploded":
-        import json
-
-        con = open_case_db(Path(args.case_dir) / "lawnlord.duckdb", read_only=True)
-        try:
-            print(json.dumps(export_exploded(
-                con,
-                filing_id=args.filing,
-                image_id=args.image,
-                document_id=args.document,
-                page_id=args.page,
-            )))
-        finally:
-            con.close()
-        return
-
-    if args.command == "export-metrics":
-        import json
-
-        con = open_case_db(Path(args.case_dir) / "lawnlord.duckdb", read_only=True)
-        try:
-            print(json.dumps(export_metrics(con, image_id=args.image)))
-        finally:
-            con.close()
-        return
-
-    if args.command == "export-regions":
-        import json
-
-        con = open_case_db(Path(args.case_dir) / "lawnlord.duckdb", read_only=True)
-        try:
-            print(json.dumps(export_regions(con, page_id=args.page)))
-        finally:
-            con.close()
-        return
-
-    if args.command == "explode":
-        case_dir = Path(args.case_dir).resolve()
-        intake_dir = find_intake_dir(case_dir)
-        out_dir = case_dir / "extracted" / "pages"
-        con = open_case_db(case_dir / "lawnlord.duckdb")
-        apply_schema(con)
-        stats = explode_case(con, intake_dir, out_dir, captured_at(intake_dir), dpi=args.dpi)
-        con.close()
-        table = Table(title="Exploded (filed PDFs → documents + page PNGs)")
-        table.add_column("Metric")
-        table.add_column("Value", justify="right")
-        table.add_row("Documents", str(stats["documents"]))
-        table.add_row("Pages rendered", str(stats["pages"]))
-        table.add_row("PNGs", str(out_dir))
-        console.print(table)
-        for m in stats["mismatches"]:
-            console.print(
-                f"[yellow]Page-count mismatch:[/] {m['image_id']} "
-                f"declared {m['declared']} vs rendered {m['rendered']}"
-            )
-        if stats["skipped_images"]:
-            console.print(f"[yellow]Skipped (no source PDF):[/] {len(stats['skipped_images'])}")
-        console.print("[green]Done.[/]")
-        return
-
-    if args.command == "regions":
-        case_dir = Path(args.case_dir).resolve()
-        intake_dir = find_intake_dir(case_dir)
-        con = open_case_db(case_dir / "lawnlord.duckdb")
-        apply_schema(con)
-        stats = capture_pdf_regions(con, intake_dir, captured_at(intake_dir))
-        con.close()
-        table = Table(title="Spatial anchors (PDF geometry → boxes per span)")
-        table.add_column("Metric")
-        table.add_column("Value", justify="right")
-        table.add_row("Regions captured", str(stats["regions"]))
-        table.add_row("Pages with geometry", str(stats["pages_with_geometry"]))
-        console.print(table)
-        if stats["skipped_no_pdf"]:
-            console.print(
-                f"[yellow]Skipped (no source PDF / page):[/] {len(stats['skipped_no_pdf'])}"
-            )
-        if stats["skipped_mismatch"]:
-            console.print(
-                f"[yellow]Skipped (text/geometry mismatch — not fabricated):[/] "
-                f"{len(stats['skipped_mismatch'])}"
-            )
-        console.print("[green]Done.[/]")
-        return
-
-    if args.command == "transcribe":
-        case_dir = Path(args.case_dir).resolve()
-        ollama_host = args.ollama_host or os.environ.get("OLLAMA_HOST")
-        transcribers = _build_transcribers(args.backend, args.model, ollama_host,
-                                            args.max_image_px, args.llamacpp_host)
-        if not transcribers:
-            return
-        has_local = any(isinstance(t, (LocalTranscriber, LlamaCppTranscriber))
-                        for t in transcribers)
-        pages_dir = case_dir / "extracted" / "pages"
-        con = open_case_db(case_dir / "lawnlord.duckdb")
-        apply_schema(con)
-        intake_dir = find_intake_dir(case_dir)
-        generated_at = captured_at(intake_dir)
-        stats = transcribe_case(
-            con, pages_dir, generated_at, transcribers,
-            force=args.force, intake_dir=intake_dir, max_workers=args.workers,
-        )
-        # Fidelity-gated escalation: re-transcribe the local tier's weakest pages
-        # on cloud Claude (ADR-0001). Only meaningful when a local model ran.
-        esc = None
-        if args.escalate_below is not None:
-            if not has_local:
-                console.print(
-                    "[yellow]--escalate-below applies to local models[/] "
-                    "(this pass had none); skipping escalation."
-                )
-            elif not os.environ.get("ANTHROPIC_API_KEY"):
-                console.print(
-                    "[yellow]--escalate-below needs ANTHROPIC_API_KEY[/] for the "
-                    "cloud pass; skipping escalation."
-                )
-            else:
-                esc = escalate_case(
-                    con, pages_dir, generated_at, CloudTranscriber(make_client()),
-                    args.escalate_below, max_workers=args.workers,
-                )
-        con.close()
-        models = ", ".join(t.model for t in transcribers)
-        table = Table(title="Transcribed (PDF text layer + every vision model)")
-        table.add_column("Metric")
-        table.add_column("Value", justify="right")
-        table.add_row("Vision models", models)
-        table.add_row("Pages from PDF text layer", str(stats["pdf_text"]))
-        table.add_row("Pages transcribed (vision)", str(stats["pages"]))
-        table.add_row("Skipped (already transcribed)", str(len(stats["skipped_existing"])))
-        table.add_row("Avg fidelity (vision)", f"{stats['avg_fidelity']:.2f}")
-        if esc is not None:
-            table.add_row(
-                f"Escalated to cloud (fidelity < {args.escalate_below})",
-                f"{esc['escalated']} of {esc['candidates']}",
-            )
-        console.print(table)
-        if stats["skipped"]:
-            console.print(f"[yellow]Skipped (no PNG):[/] {len(stats['skipped'])}")
-        if stats["failed"]:
-            console.print(
-                f"[red]Failed (vision error after retries):[/] {len(stats['failed'])}"
-            )
-        console.print("[green]Done.[/]")
-        return
-
-    if args.command == "measure":
-        case_dir = Path(args.case_dir).resolve()
-        transcribers: dict = {}
-        host = args.ollama_host or os.environ.get("OLLAMA_HOST")
-        for m in (s.strip() for s in args.models.split(",") if s.strip()):
-            if ollama_available(m, host):
-                transcribers[m] = LocalTranscriber(model=m, host=host)
-            else:
-                console.print(f"[yellow]Skipping[/] local model '{m}' (not pulled/reachable).")
-        if args.cloud:
-            if os.environ.get("ANTHROPIC_API_KEY"):
-                transcribers[f"cloud:{DEFAULT_MODEL}"] = CloudTranscriber(make_client())
-            else:
-                console.print("[yellow]--cloud set but no ANTHROPIC_API_KEY[/] — omitting cloud.")
-        if not transcribers:
-            console.print("[red]No backends available to measure.[/]")
-            raise SystemExit(1)
-        pages_dir = case_dir / "extracted" / "pages"
-        con = open_case_db(case_dir / "lawnlord.duckdb", read_only=True)
-        intake_dir = find_intake_dir(case_dir)
-        try:
-            result = measure_case(con, pages_dir, transcribers, sample=args.sample,
-                                  intake_dir=intake_dir)
-        finally:
-            con.close()
-        labels = result["labels"]
-        table = Table(title=f"Backend comparison ({result['sampled']} image-only pages)")
-        table.add_column("Backend")
-        table.add_column("Avg fidelity", justify="right")
-        for t in (0.7, 0.8, 0.9, 0.95):
-            table.add_column(f"<{t}", justify="right")
-        for label in labels:
-            row = [label, f"{result['avg_fidelity'][label]:.3f}"]
-            row += [f"{result['escalation_fraction'][label][t]:.0%}" for t in (0.7, 0.8, 0.9, 0.95)]
-            table.add_row(*row)
-        console.print(table)
-        console.print(
-            "[dim]Columns <T = share of sampled pages that backend reads below "
-            "fidelity T (the fraction that would escalate at that threshold).[/]"
-        )
-        return
+    COMMANDS[args.command](args)

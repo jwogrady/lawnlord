@@ -14,10 +14,17 @@ import { join } from "node:path";
 
 import index from "./index.html";
 import { handleDownload, type DownloadConfig } from "./download";
+import { safeJoin, pngRoot } from "./paths";
 
 const CASE_DIR = process.env.CASE_DIR ?? ".";
 const REPO_ROOT = join(import.meta.dir, "..");
 const PORT = Number(process.env.PORT ?? 4173);
+
+// This viewer serves sensitive legal PDFs, so it binds to loopback only by
+// default — unreachable from other hosts on the LAN. Exposing it on the
+// network requires a deliberate opt-in: set HOST (e.g. HOST=0.0.0.0) to bind
+// elsewhere. Without that env var the server only answers on 127.0.0.1.
+const HOST = process.env.HOST ?? "127.0.0.1";
 
 // The extracted intake dir (data.json + files/ + pages/): either CASE_DIR
 // itself, or the single folder under CASE_DIR/intake that holds a data.json.
@@ -46,38 +53,60 @@ const DOWNLOAD_CONFIG: DownloadConfig = {
 	repoRoot: REPO_ROOT,
 };
 
-// Serve a file from the intake dir under a fixed subdir, blocking path escapes.
+// Serve a file from the intake dir under a fixed subdir, confining the path to
+// INTAKE_DIR/<sub> via the shared safeJoin (rejects `..`, absolute components,
+// null bytes, and symlinks pointing out — #145).
 function serveFromIntake(sub: string, rest: string): Response {
-	const decoded = decodeURIComponent(rest);
-	if (decoded.includes("..")) return new Response("Forbidden", { status: 403 });
-	const file = Bun.file(join(INTAKE_DIR, sub, decoded));
-	return new Response(file);
+	const abs = safeJoin(join(INTAKE_DIR, sub), decodeURIComponent(rest));
+	if (!abs) return new Response("Forbidden", { status: 403 });
+	return new Response(Bun.file(abs));
 }
 
 const server = Bun.serve({
+	hostname: HOST,
 	port: PORT,
 	development: { hmr: true, console: true },
 	routes: {
 		"/": index,
 		// The Actual-lens payload, straight from the DuckDB mirror via the CLI.
 		"/api/case": async () => {
-			const out = await Bun.$`uv run lawnlord export-actual --case-dir ${CASE_DIR}`
-				.cwd(REPO_ROOT)
-				.quiet()
-				.text();
-			return new Response(out, {
-				headers: { "content-type": "application/json" },
-			});
+			try {
+				const out = await Bun.$`uv run lawnlord export-actual --case-dir ${CASE_DIR}`
+					.cwd(REPO_ROOT)
+					.quiet()
+					.text();
+				return new Response(out, {
+					headers: { "content-type": "application/json" },
+				});
+			} catch (err) {
+				// A nonzero exit (locked DB, CLI/shell error) becomes a structured
+				// 500 the viewer surfaces as a visible error state, never an uncaught
+				// throw that hangs the page on "Loading…" (mirrors metrics/regions).
+				return new Response(JSON.stringify({ error: String(err) }), {
+					status: 500,
+					headers: { "content-type": "application/json" },
+				});
+			}
 		},
 		// The Exploded-lens payload: images → documents → pages + transcription.
 		"/api/exploded": async () => {
-			const out = await Bun.$`uv run lawnlord export-exploded --case-dir ${CASE_DIR}`
-				.cwd(REPO_ROOT)
-				.quiet()
-				.text();
-			return new Response(out, {
-				headers: { "content-type": "application/json" },
-			});
+			try {
+				const out = await Bun.$`uv run lawnlord export-exploded --case-dir ${CASE_DIR}`
+					.cwd(REPO_ROOT)
+					.quiet()
+					.text();
+				return new Response(out, {
+					headers: { "content-type": "application/json" },
+				});
+			} catch (err) {
+				// Same hardening as /api/case: a CLI/shell failure returns a
+				// structured 500 instead of throwing, so the Exploded lens shows an
+				// error rather than spinning forever.
+				return new Response(JSON.stringify({ error: String(err) }), {
+					status: 500,
+					headers: { "content-type": "application/json" },
+				});
+			}
 		},
 		// The divergence/confidence rollups (coverage, mean agreement, per-model
 		// fidelity, flagged-page worklist) at the case and image levels (#127). The
@@ -139,8 +168,9 @@ const server = Bun.serve({
 		// Exploded-layer page PNGs (rendered by `lawnlord explode`).
 		if (url.pathname.startsWith("/png/")) {
 			const rest = decodeURIComponent(url.pathname.slice("/png/".length));
-			if (rest.includes("..")) return new Response("Forbidden", { status: 403 });
-			return new Response(Bun.file(join(CASE_DIR, "extracted", "pages", rest)));
+			const abs = safeJoin(pngRoot(CASE_DIR), rest);
+			if (!abs) return new Response("Forbidden", { status: 403 });
+			return new Response(Bun.file(abs));
 		}
 		return new Response("Not found", { status: 404 });
 	},

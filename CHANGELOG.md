@@ -14,6 +14,24 @@ closed.
 
 ### Added
 
+- **Per-run transcription log file** (#156). The transcribe pass now configures a `logging.Logger`
+  with a per-run `FileHandler` writing under `<case-dir>/logs/transcribe-<timestamp>.log`, additive
+  to (and leaving unchanged) the user-facing Rich console. Every per-page failure that the passes
+  previously swallowed — vision errors in `transcribe_case`/`escalate_case`, retry exhaustion, the
+  llama.cpp `finish_reason='length'` truncation safeguard, and an unreachable Ollama server — now
+  emits one record carrying the page id, revision, backend/model label, and the exception type,
+  message, and traceback. A run with failed pages still succeeds; the log accounts for every page in
+  the returned `failed` list. The file level is configurable without a code edit via the
+  `--log-level` flag or the `LAWNLORD_LOG_LEVEL` env var (default INFO); console verbosity is
+  unchanged.
+- **Manifest sha256 verification on import** (#158). The intake manifest's per-file `sha256` is now
+  a verified contract, not just recorded metadata. On import each filed PDF the manifest declares is
+  hashed afresh and compared to its declared hash; a mismatch (tampered/truncated bytes) or a
+  manifest-declared file missing on disk raises a clear, identifying `ManifestHashMismatch` (naming
+  the file and both hashes) and aborts the case's ingest **before** any row is inserted — consistent
+  with the codebase's existing fail-loud posture. Manifest-less intakes, or manifests without per-file
+  hashes, skip verification (matching the `capturedAt` fallback philosophy); when every declared hash
+  matches, ingest output is byte-identical to before.
 - **Confidence gauges for the transcription corpus** (#127; ADR-0007/0008). The Exploded lens now
   opens with an at-a-glance confidence read at both the **case** and **image** levels: coverage
   (the fraction of expected `page × variation` cells present), cross-model agreement, a per-model

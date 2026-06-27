@@ -191,6 +191,34 @@ def test_transcribe_page_sends_image_and_parses(tmp_path):
     assert out == {"text": "HELLO", "fidelity": 0.5, "model": main.TRANSCRIBE_MODEL}
 
 
+def test_transcribe_page_truncated_max_tokens_forces_fidelity_zero(tmp_path):
+    # A cloud response that ended on stop_reason='max_tokens' is truncated — its
+    # JSON never closes. transcribe_page must not raise; it salvages the partial
+    # text and forces fidelity to 0.0 (below FIDELITY_FLAG_THRESHOLD), mirroring
+    # the llama.cpp finish_reason=='length' guard.
+    case_dir = _exploded_case(tmp_path, pages=1)
+    png = next((case_dir / "extracted" / "pages").rglob("*.png"))
+    truncated = '{"transcription": "PARTIAL PAGE TEXT that got cut off mid'
+
+    class _TruncatedClient:
+        def __init__(self):
+            resp = SimpleNamespace(
+                content=[SimpleNamespace(type="text", text=truncated)],
+                stop_reason="max_tokens",
+            )
+
+            class _Messages:
+                def create(self, **kwargs):
+                    return resp
+
+            self.messages = _Messages()
+
+    out = main.transcribe_page(png, _TruncatedClient())
+    assert out["fidelity"] == 0.0
+    assert out["model"] == main.TRANSCRIBE_MODEL
+    assert "PARTIAL PAGE TEXT" in out["text"]  # salvaged, not discarded
+
+
 def test_cli_transcribe_is_opt_in(tmp_path, capsys, monkeypatch):
     # ADR-0006 default (--backend all): the exhaustive pass runs cloud-when-keyed
     # PLUS every installed local vision model. With NEITHER a key NOR any local
@@ -292,6 +320,63 @@ def test_permanent_failure_is_reported_not_dropped(tmp_path, monkeypatch):
     # page's vision read and the image-only page's). Failures dropped no good rows.
     assert len(stats["failed"]) == 2
     assert sources == ["pdf_text"]                          # only the free text layer survived
+
+
+def test_per_run_log_accounts_for_failed_pages(tmp_path, monkeypatch):
+    # A run with failing vision calls succeeds (no abort) but leaves a per-run
+    # log file whose ERROR records name every page_id in the returned `failed`
+    # list, with the model and exception. (#156)
+    import lawnlord.transcribe as tx
+    from lawnlord.logging_setup import setup_run_logging
+
+    monkeypatch.setattr(tx.time, "sleep", lambda _s: None)
+    case_dir = _exploded_case(tmp_path, pages=2)              # no intake_dir → all vision
+    log_path = setup_run_logging(case_dir, run_id="testrun")
+    assert log_path.parent == case_dir / "logs"              # under logs/ subtree
+    assert "testrun" in log_path.name                        # per-run id in filename
+
+    class FailingClient:
+        def __init__(self):
+            self.messages = self
+
+        def create(self, **kwargs):
+            raise RuntimeError("permanent boom")             # non-transient → no retry
+
+    con = main.open_case_db(case_dir / "lawnlord.duckdb")
+    main.apply_schema(con)
+    stats = main.transcribe_case(con, case_dir / "extracted" / "pages", "t0",
+                                 _cloud(FailingClient()))
+    con.close()
+
+    import logging
+    for h in logging.getLogger("lawnlord").handlers:
+        h.flush()
+    assert len(stats["failed"]) == 2                         # both pages failed
+    assert log_path.exists()
+    contents = log_path.read_text(encoding="utf-8")
+    for page_id in stats["failed"]:                          # every failed page logged
+        assert page_id in contents
+    assert "permanent boom" in contents                      # exception message captured
+    assert contents.count("transcribe failed") == 2          # one ERROR record per page
+
+
+def test_log_level_configurable_via_env(tmp_path, monkeypatch):
+    # The file level honors LAWNLORD_LOG_LEVEL without a code edit; the default
+    # (INFO) is applied when unset. (#156)
+    import logging
+
+    from lawnlord.logging_setup import setup_run_logging
+
+    monkeypatch.delenv("LAWNLORD_LOG_LEVEL", raising=False)
+    setup_run_logging(tmp_path, run_id="a")
+    assert logging.getLogger("lawnlord").level == logging.INFO
+
+    monkeypatch.setenv("LAWNLORD_LOG_LEVEL", "DEBUG")
+    setup_run_logging(tmp_path, run_id="b")
+    assert logging.getLogger("lawnlord").level == logging.DEBUG
+
+    setup_run_logging(tmp_path, run_id="c", level="ERROR")   # explicit arg wins
+    assert logging.getLogger("lawnlord").level == logging.ERROR
 
 
 def test_local_transcriber_calls_ollama(tmp_path, monkeypatch):
@@ -495,7 +580,8 @@ def test_is_transient_classifies_cloud_and_local_errors():
     import urllib.error
     import lawnlord.transcribe as tx
 
-    overloaded = RuntimeError("529"); overloaded.status_code = 529
+    overloaded = RuntimeError("529")
+    overloaded.status_code = 529
     assert tx._is_transient(overloaded) is True              # cloud overloaded
     http503 = urllib.error.HTTPError("u", 503, "busy", {}, None)
     assert tx._is_transient(http503) is True                 # Ollama warming (.code)
@@ -522,8 +608,6 @@ def test_page_holds_every_transcription_variation(tmp_path):
     # plus a row per vision model — each addressable by its surrogate id. They
     # coexist; the surrogate key never collapses them into one lineage.
     import duckdb
-
-    import lawnlord.transcribe as tx
 
     case_dir = _exploded_case(tmp_path, pages=1)
     con = main.open_case_db(case_dir / "lawnlord.duckdb")
