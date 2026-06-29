@@ -328,11 +328,13 @@ class LlamaCppTranscriber:
         # positive value) still downscales, 0 is treated as native.
         self._max_image_px = max_image_px or None
 
-    def transcribe(self, png_path: str | Path) -> dict:
-        import urllib.request
-
+    def prepare(self, png_path: str | Path) -> bytes:
+        """CPU-only half of a page: read + (optionally) resize + base64-encode the
+        PNG and serialize the request body. Split out from the network call so a
+        prefetch thread can encode page N+1 while page N's inference is in flight
+        on the GPU (see ``transcribe_case``); on its own it changes nothing."""
         data_uri = "data:image/png;base64," + _b64_png_scaled(png_path, self._max_image_px)
-        payload = json.dumps({
+        return json.dumps({
             "model": self.model,
             "messages": [{"role": "user", "content": [
                 {"type": "text", "text": _PROMPT},
@@ -351,6 +353,12 @@ class LlamaCppTranscriber:
             "response_format": {"type": "json_schema", "json_schema": {
                 "name": "page", "schema": _OUTPUT_SCHEMA, "strict": True}},
         }).encode("utf-8")
+
+    def transcribe_prepared(self, payload: bytes) -> dict:
+        """Network/GPU half: POST a body built by :meth:`prepare` and parse the
+        result. Same ``{text, fidelity, model}`` contract as :meth:`transcribe`."""
+        import urllib.request
+
         req = urllib.request.Request(
             f"{self._host}/v1/chat/completions", data=payload,
             headers={"Content-Type": "application/json"},
@@ -369,10 +377,13 @@ class LlamaCppTranscriber:
             result["fidelity"] = 0.0
             _log.warning(
                 "llamacpp transcription truncated (finish_reason='length'); "
-                "forcing fidelity=0.0 model=%s png=%s",
-                self.model, png_path,
+                "forcing fidelity=0.0 model=%s",
+                self.model,
             )
         return result
+
+    def transcribe(self, png_path: str | Path) -> dict:
+        return self.transcribe_prepared(self.prepare(png_path))
 
 
 def _ollama_tags(host: str | None = None) -> list[dict] | None:
@@ -470,6 +481,22 @@ def _is_transient(exc: Exception) -> bool:
         anthropic.APIConnectionError, anthropic.APITimeoutError,
         urllib.error.URLError, socket.timeout,  # connection refused / read timeout
     ))
+
+
+def _retry_call(fn, attempts: int = _RETRY_ATTEMPTS, base_delay: float = _RETRY_BASE_DELAY) -> dict:
+    """Call ``fn()`` with the same exponential-backoff-on-transient policy as
+    :func:`_transcribe_with_retry`, but for an already-bound callable (e.g. the
+    prepared-payload path, where the image is encoded ahead of time). Re-raises a
+    non-transient error or the last attempt for the caller to record."""
+    for attempt in range(attempts):
+        try:
+            return fn()
+        except Exception as exc:
+            if attempt + 1 >= attempts or not _is_transient(exc):
+                raise
+            delay = base_delay * (2 ** attempt)
+            time.sleep(delay * (0.5 + random.random()))
+    raise ValueError(f"attempts must be >= 1, got {attempts}")
 
 
 def _transcribe_with_retry(
@@ -635,31 +662,82 @@ def transcribe_case(
     # Phase 2 (concurrent): the network-bound vision calls. Each result is
     # committed on this thread as its future completes, so progress is durable
     # mid-run; a unit that fails after retries is reported, not dropped.
+    #
+    # Client-side prefetch (perf): a single encoder thread reads+resizes+base64-
+    # encodes the NEXT unit's image (``transcriber.prepare``) while the current
+    # unit's inference is in flight, so a single-slot GPU server isn't stalled on
+    # CPU image-prep between pages. The bounded queue caps how far ahead it encodes
+    # (memory), in-flight inference is capped at ``workers``, and every DB write
+    # still happens on this thread the moment a unit finishes — so durability,
+    # skip/resume, and the page/rev-ordered read-back are all unchanged. A
+    # transcriber without ``prepare`` (e.g. cloud) falls back to inline encode, so
+    # its behavior is identical to before.
     if vision:
+        import threading
+        from queue import Queue
+
         workers = max(1, min(max_workers, len(vision)))
+        prep_q: Queue = Queue(maxsize=workers + 1)
+        _STOP = object()
+
+        def _prefetch() -> None:
+            for unit in vision:
+                png, tr = unit[3], unit[4]
+                prepared: object = None
+                if hasattr(tr, "prepare"):
+                    try:
+                        prepared = tr.prepare(png)
+                    except Exception as exc:  # carry to the inference stage as a failure
+                        prepared = exc
+                prep_q.put((unit, prepared))
+            prep_q.put(_STOP)
+
+        feeder = threading.Thread(target=_prefetch, name="prefetch-encoder", daemon=True)
+        feeder.start()
+
+        in_flight: dict = {}
+
+        def _run(unit, prepared) -> dict:
+            _pid, _cid, _rev, png, tr = unit
+            if isinstance(prepared, BaseException):
+                raise prepared
+            if prepared is not None and hasattr(tr, "transcribe_prepared"):
+                return _retry_call(lambda: tr.transcribe_prepared(prepared))
+            return _transcribe_with_retry(tr, png)
+
+        def _collect(future) -> None:
+            nonlocal done, fidelity_sum
+            page_id, case_id, rev, model = in_flight.pop(future)
+            try:
+                result = future.result()
+            except Exception as exc:
+                failed.append(page_id)
+                _log.error(
+                    "transcribe failed page_id=%s rev=%s model=%s: %s: %s",
+                    page_id, rev, model, type(exc).__name__, exc, exc_info=exc,
+                )
+                return
+            con.execute(_PAGE_TEXT_INSERT, [_row_id(page_id, "ai", result["model"], rev),
+                                  case_id, page_id, rev, "ai", result["text"],
+                                  result["fidelity"], result["model"], generated_at])
+            done += 1
+            fidelity_sum += result["fidelity"]
+
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            future_to_unit = {
-                pool.submit(_transcribe_with_retry, tr, png):
-                    (page_id, case_id, rev, tr.model)
-                for (page_id, case_id, rev, png, tr) in vision
-            }
-            for future in as_completed(future_to_unit):
-                page_id, case_id, rev, model = future_to_unit[future]
-                try:
-                    result = future.result()
-                except Exception as exc:
-                    failed.append(page_id)
-                    _log.error(
-                        "transcribe failed page_id=%s rev=%s model=%s: %s: %s",
-                        page_id, rev, model, type(exc).__name__, exc,
-                        exc_info=exc,
-                    )
-                    continue
-                con.execute(_PAGE_TEXT_INSERT, [_row_id(page_id, "ai", result["model"], rev),
-                                      case_id, page_id, rev, "ai", result["text"],
-                                      result["fidelity"], result["model"], generated_at])
-                done += 1
-                fidelity_sum += result["fidelity"]
+            while True:
+                item = prep_q.get()
+                if item is _STOP:
+                    break
+                unit, prepared = item
+                page_id, case_id, rev, _png, tr = unit
+                fut = pool.submit(_run, unit, prepared)
+                in_flight[fut] = (page_id, case_id, rev, tr.model)
+                # Keep at most `workers` inferences in flight; commit each as it
+                # finishes so the bounded encoder stays ~1 ahead (overlap).
+                while len(in_flight) >= workers:
+                    _collect(next(as_completed(in_flight)))
+            for fut in as_completed(list(in_flight)):
+                _collect(fut)
 
     return {
         "pages": done,

@@ -7,13 +7,13 @@ why, and (4) a paste-ready checklist for capturing `cosmos` when next at that ma
 
 | | **cosmic** (work) | **cosmos** (home) |
 |---|---|---|
-| GPU | AMD Radeon RX 6900 XT (RDNA2/gfx1030, 16 GB) | NVIDIA *(confirm model at home)* |
-| OS | Windows 11 + WSL2 (Ubuntu) | native Linux |
-| Compute backend | **Vulkan** (ROCm unsupported on gfx1030) | CUDA |
-| Where inference runs | **Windows host** (WSL offloads over HTTP) | **local** (Linux Ollama serves the GPU directly) |
+| GPU | AMD Radeon RX 6900 XT (RDNA2/gfx1030, 16 GB) | NVIDIA GeForce RTX 3080 (Ampere, **10 GB**) ✅ verified 2026-06-28 |
+| OS | Windows 11 + WSL2 (Ubuntu) | Windows + WSL2 (Ubuntu) — **not** native Linux (earlier assumption corrected) |
+| Compute backend | **Vulkan** (ROCm unsupported on gfx1030) | CUDA (`/usr/local/lib/ollama/cuda_v13`) |
+| Where inference runs | **Windows host** (WSL offloads over HTTP) | **local** (`scripts/llamacpp_server.sh` serves the GPU directly) |
 | Ollama endpoint | `http://172.31.128.1:11434` (host gateway) | `http://localhost:11434` |
-| Production vision path | `--backend llamacpp` → `scripts/cosmic/serve_vision.cmd 4 2048` (native 300 DPI, ~24 pg/min) | `--backend local` / `scripts/llamacpp_server.sh` *(confirm)* |
-| Models present | `qwen2.5vl:7b` only | `qwen2.5vl:7b` + `minicpm-v:latest` *(confirm)* |
+| Production vision path | `--backend llamacpp` → `scripts/cosmic/serve_vision.cmd 4 2048` (native 300 DPI, ~24 pg/min) | `--backend llamacpp` → `NP=1 scripts/llamacpp_server.sh` (300 DPI, ~6 s/page, ~25 min/255 pg). **NP=1 is required: 10 GB can't fit NP≥2** — see profile warning |
+| Models present | `qwen2.5vl:7b` only | `qwen2.5vl:7b` (best) + `minicpm-v:latest` + `granite3.2-vision:2b` |
 | Profile | [`profiles/cosmic-amd.env`](../../profiles/cosmic-amd.env) | [`profiles/cosmos-nvidia.env`](../../profiles/cosmos-nvidia.env) |
 | Machine reference | [`development-machine.md`](development-machine.md) | *(to be written: `development-machine-cosmos.md`)* |
 

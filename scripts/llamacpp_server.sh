@@ -33,6 +33,13 @@ HOST_ADDR="${HOST_ADDR:-127.0.0.1}"
 CTX="${CTX:-8192}"
 OLLAMA_LIB="${OLLAMA_LIB:-/usr/local/lib/ollama}"
 
+# Parallel decode slots. Leave unset to let llama-server auto-pick (it chooses 4
+# on a 16 GB card). On a smaller card (e.g. the RTX 3080 / 10 GB cosmos box) the
+# 4-slot KV cache + GPU mmproj won't fit a 300 DPI page — set NP=2 (or 1) to cap it.
+NP="${NP:-}"
+PARALLEL_ARGS=()
+[ -n "$NP" ] && PARALLEL_ARGS=(-np "$NP")
+
 # The two non-obvious bits (see memory: ollama-vision-cpu-bottleneck):
 #  1. GGML_BACKEND_PATH — the CUDA backend lives in a cuda_v* subdir, which the
 #     raw binary doesn't auto-discover (Ollama's Go loader normally does).
@@ -60,4 +67,5 @@ exec env \
   "$OLLAMA_LIB/llama-server" \
     -m "$GGUF" --mmproj "$GGUF" \
     -ngl 99 --flash-attn on -b 2048 -ub 2048 \
+    "${PARALLEL_ARGS[@]}" \
     -c "$CTX" --port "$PORT" --host "$HOST_ADDR"
